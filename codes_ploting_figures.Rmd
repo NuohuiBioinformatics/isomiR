@@ -1,0 +1,2155 @@
+---
+title: 'CPF 文章绘图代码汇总'
+author: "Xiao Long .An"
+date: \`r format(Sys.time())`\
+documentclass: ctexart
+output: 
+  rticles::ctex:
+    df_print: "kable"
+    fig_caption: yes
+    number_sections: yes
+    toc: yes 
+classoption: "hyperref,"
+always_allow_html: true
+---
+
+```{r ps}
+大多数代码都需要同事绘制好几个模型的图,有一些需要换参数就可以绘制另一个模型的图.有时候需要把一部分代码拎出来单独绘制个性化图,且代码适配的是我的建模流程输出的内容,要是其他流程建模出来的,代码仅供参考.建议自己重新写,有参考也不难.
+```
+
+```{r setup, include=FALSE}
+library(ggstar)
+library(rmarkdown)
+library(reshape2)
+library(ggvenn)
+library(ggrepel) 
+library(ggsignif)
+library(pheatmap)
+library(knitr)
+library(tidyverse)
+library(kableExtra)
+library(slickR)
+library(bsselectR)
+library(DT)
+library(pROC)
+library(rjson)
+library(figpatch)
+library(gridExtra)
+library(grid)
+library(ggbeeswarm)
+library(RColorBrewer)
+knitr::opts_chunk$set(
+	echo = FALSE,
+	fig.align = "center",
+	fig.height = 50,
+	fig.width = 80,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+## fig 1
+
+### 饱和度曲线图
+
+
+```{r choose_sample}
+library(XML)
+data_qc <- readHTMLTable("http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/12_UMI_mapping_position_directional_dedup_result/03.rerun.sum/qc/miRNAQC.html",which = 1)
+names(data_qc)[1] <- "Sample"
+for (i in names(data_qc)[-1]){data_qc[[i]] <- as.numeric(gsub("%","",data_qc[[i]]))}
+data_qc$Sample <- gsub("R03|-.*","",data_qc$Sample)
+group <- all_ann_col
+group$Stage <- as.character(group$Stage)
+group <- group[grepl("CRC|Normal",group$Stage),]
+group$Stage <- gsub("CRC.*","CRC",group$Stage)
+group$Sample <- rownames(group)
+data_qc <- merge(data_qc,group,all.y = T)
+df <- data.frame(row.names = data_qc$Sample, depth=data_qc$`M raw reads`,group=data_qc$Stage)
+# 计算五等分的边界点
+# 计算五等分的边界点
+breaks <- quantile(df$depth, probs = seq(0, 1, by = 0.2))
+
+# 对边界点进行取整
+breaks_rounded <- round(breaks)
+
+# 计算每个分组的五等分区间，并生成区间编号
+df$depth_interval <- cut(
+  df$depth, 
+  breaks = breaks, 
+  include.lowest = TRUE, 
+  labels = FALSE
+)
+
+# 手动设置 labels，并使用取整后的边界点
+labels <- paste0("(", breaks_rounded[-length(breaks_rounded)], ",", breaks_rounded[-1], "]")
+
+# 计算每个分组的五等分区间，并生成区间范围
+df$depth_range <- cut(
+  df$depth, 
+  breaks = breaks, 
+  include.lowest = TRUE, 
+  labels = labels
+)
+# 为了确保每个分组都有5个区间，检查是否有空的区间
+table(df$group, df$depth_interval)
+
+# 初始化结果列表
+selected_samples <- list()
+
+# 对于每个分组（cancer 和 control）
+for (group in unique(df$group)) {
+  # 初始化该分组的选中样本列表
+  group_samples <- c()
+  
+  # 对于每个区间
+  for (interval in 1:5) {
+    # 筛选出属于当前分组和当前区间的样本
+    subset_df <- df[df$group == group & df$depth_interval == interval, ]
+    
+    # 如果该区间有样本，随机抽取一个
+    if (nrow(subset_df) > 0) {
+      selected_sample <- subset_df[sample(nrow(subset_df), 1), ]
+      group_samples <- rbind(group_samples, selected_sample)
+    }
+  }
+  
+  # 将选中的样本添加到结果列表中
+  selected_samples[[group]] <- group_samples
+}
+
+# 转换结果为数据框
+selected_samples_df <- do.call(rbind, selected_samples)
+
+```
+
+```{r lineplot}
+library(ggsci)
+library(ggstar)
+# data <- read.table("http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/12_UMI_mapping_position_directional_dedup_result/03.rerun.sum/miRNAs_ds/miRNAs_readscount.tsv",header = T,check.names = F) %>% t() %>% as.data.frame()
+# data$isomiRs <- rownames(data)
+selected_samples_df <- read.table("http://10.30.10.200:10085//storeData/project/user/anxiaolong/work/make_data/CRC/model_result/paper-xu/paper_plot/fig1/select_sample.xls")
+data <- read.csv("http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/12_UMI_mapping_position_directional_dedup_result/04.downsample/00.output/isomiRs_readscount_isomirdb.csv",header = T)
+data <- read.csv("http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/12_UMI_mapping_position_directional_dedup_result/04.downsample/00.output/miRNAs_readscount_isomirdb.csv",header = T)
+dt <- melt(data)
+names(dt)[1] <- "isomiRs"
+dt$deep <- gsub(".*\\.","",dt$variable)
+dt$sample <- gsub("\\..*|R03","",dt$variable)
+group <- data.frame(sample=gsub(".*\\.","",rownames(selected_samples_df)),group=selected_samples_df$group)
+dt <- merge(dt,group,all.x = T)
+# dt <- dcast(dt,sample+isomiRs+group~deep)
+# dt[is.na(dt)] <- 0
+# dt <- dcast(dt,sample+miRNA+group~deep)
+linetype <- c(1000000,500,50,15,5)
+result <- data.frame(sample=c(),group=c(),deep=c(),percent=c(),interval=c())
+for (i in group$sample) {
+  de <- max(as.numeric(gsub("M","",dt$deep[dt$sample==i])))
+  for (j in rev(c(c("1M","5M"),paste0(seq(10,de,10),"M")))) {
+    for (k in c(1:4)) {
+      df <- dt[dt$sample==i,]
+      df <- dcast(df,sample+isomiRs+group~deep)
+      df <- df[(df$sample==i)&(df[[paste0(de,"M")]]<linetype[k])&(df[[paste0(de,"M")]]>=linetype[k+1]),]
+      re <- data.frame(sample=i,group=group$group[group$sample==i],deep=j,percent=sum(df[[j]]>=5)/dim(df)[1],interval=paste0(linetype[k],"~",linetype[k+1]))
+      result <- rbind(result,re)
+    }
+  }
+}
+result$deep <- factor(result$deep,levels = c(c("1M","5M"),paste0(seq(10,140,10),"M")))
+result$interval <- factor(result$interval,levels = c("15~5","50~15","500~50","1e+06~500"))
+result$test <- paste0(result$sample,"_",result$interval)
+group <- df[rownames(df) %in% unique(result$sample),]
+group$sample <- rownames(group)
+result <- merge(result,group)
+saveRDS(result,"G:/work/make_data/CRC/model_result/paper-xu/paper_plot/fig1/miRNA_readscound_stats_result.rds")
+ggplot(result,aes(x=deep,y=percent,group=test,color=interval))+
+  geom_line(size=0.75)+
+  geom_point(size=6,shape=20,color="white")+
+  geom_point(aes(shape=depth_range),size=2,stroke=1.25)+ 
+  facet_wrap(~group,ncol = 1)+
+  theme_classic(15) +
+  theme(plot.title = element_text(hjust = 0.5),strip.background = element_rect(fill = "white"),axis.text.x = element_text(color="black",size = 12),axis.text.y = element_text(color="black",size = 12)) + xlab("Raw Reads(M)") + 
+  ylab("Detected/Total miRNAs") +
+  # ylab("Detected/Total miRNAs") +
+  scale_color_nejm(name="Reads",labels=c("5-14","15-49","50-499",">500")) +
+  scale_shape_discrete(name="Range")
+  
+ggsave("./paper/fig1/miRNA_readscount_plot_CRC_Normal_sample_select.pdf",width = 10,height = 7)
+# ggsave("./paper/fig1/miRNA_readscount_plot.pdf",width = 10,height = 15)
+```
+
+###  梯度isomiR特征统计图
+
+```{r iso_feature}
+library(stringr)
+judge_column <- function(id) {
+  # 将字符串按'_'分割
+  parts <- unlist(strsplit(id, '_'))
+  
+  # 提取各个部分
+  End5 <- parts[2]
+  End3 <- parts[3]
+  SNV <- parts[4]
+  
+  # 判断字符串属于哪一列
+  column <- if ((End5 != '0') & (End3 == '0') & (SNV == '0')) {
+    'judge_End5'
+  } else if ((End5 == '0') & (End3 != '0') & (SNV == '0')) {
+    'judge_End3'
+  } else if ((End5 == '0') & (End3 == '0') & (SNV != '0')) {
+    'judge_SNV'
+  } else if ((End5 == '0') & (End3 == '0') & (SNV == '0')) {
+    'judge_Canonical'
+  } else {
+    'judge_Mixed'
+  }
+  
+  # 计算字符串长度
+  length <- nchar(parts[5])
+  
+  # 计算GC含量
+  gc_count <- sum(str_count(parts[5], c('G', 'C')))
+  gc_content <- gc_count / length
+  
+  # 返回结果
+  return(list(column = column, length = length, gc_content = gc_content))
+}
+
+data <- read.table("http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/9_iso_vs_readscount/merge_isomiR_seq.tsv",header = T)
+dt <- melt(data)
+dt$deep <- gsub(".*\\.","",dt$variable)
+dt$sample <- gsub("\\..*","",dt$variable)
+group <- data.frame(sample=unique(dt$sample),group=c("AA","BL","Normal","Tis","CRC"))
+dt <- merge(dt,group,all.x = T)
+dt <- dcast(dt,sample+isomiR_Sequence+group~deep)
+deeptype <- c("1M",paste0(seq(10,170,20),"M"))
+result <- data.frame()
+for (i in c("AA","BL","Normal","Tis","CRC")) {
+  for (j in c(2:10)) {
+    for(id in setdiff(dt$isomiR_Sequence[dt[[deeptype[j]]]>=5],dt$isomiR_Sequence[dt[[deeptype[j-1]]]>=5])){
+      re <- data.frame(isomiR=id,group=i,deep=deeptype[j],isoType=judge_column(id)[[1]],isolength=judge_column(id)[[2]],isoGC=judge_column(id)[[3]])
+      result <- rbind(result,re)
+    }
+  }
+}
+result$deep <- factor(result$deep,levels = deeptype)
+####GC
+ggplot(result,aes(x=isoGC,color=deep)) +
+  geom_density() +
+  theme_classic(15) +
+  theme(plot.title = element_text(hjust = 0.5),strip.background = element_rect(fill = "white"),axis.text.x = element_text(color="black",size = 12),axis.text.y = element_text(color="black",size = 12)) +
+  facet_wrap(~group,ncol = 1)
+
+ggplot(result,aes(x=deep,y=isoGC,color=deep)) +
+  geom_boxplot() +
+  theme_classic(15) +
+  theme(plot.title = element_text(hjust = 0.5),strip.background = element_rect(fill = "white"),axis.text.x = element_text(color="black",size = 12),axis.text.y = element_text(color="black",size = 12)) +
+  facet_wrap(~group,ncol = 1)
+
+data_m <- read.delim("http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/9_iso_vs_readscount/hsa.mature.fa",header = F)
+rre <- data.frame(id = data_m$V1[!grepl("h",data_m$V1)])
+GC <- c()
+for (id in rre$id) {
+   GC <- c(GC,sum(str_count(id, c('G', 'C')))/nchar(id))
+}
+rre$GC <- GC
+
+ggplot(rre,aes(x=GC,color="red")) +
+  geom_density() +
+  theme_classic(15) +
+  theme(plot.title = element_text(hjust = 0.5),strip.background = element_rect(fill = "white"),axis.text.x = element_text(color="black",size = 12),axis.text.y = element_text(color="black",size = 12)) +
+  geom_vline(xintercept = 0.4, linetype = "dashed", color = "darkred")
+  facet_wrap(~group,ncol = 1)
+
+data_in <- data[rowSums(data >=5) == 96,]
+rre <- data.frame(id = data_in$isomiR_Sequence)
+GC <- c()
+for (id in rre$id) {
+   GC <- c(GC,judge_column(id)[[3]])
+}
+rre$GC <- GC
+
+rre <- data.frame(id = data$isomiR_Sequence)
+GC <- c()
+for (id in rre$id) {
+   GC <- c(GC,judge_column(id)[[3]])
+}
+rre$GC <- GC
+#### length
+ggplot(result,aes(x=isolength,color=deep)) +
+  geom_density() +
+  theme_classic(15) +
+  theme(plot.title = element_text(hjust = 0.5),strip.background = element_rect(fill = "white"),axis.text.x = element_text(color="black",size = 12),axis.text.y = element_text(color="black",size = 12)) +
+  facet_wrap(~group,ncol = 1)
+
+ggplot(result,aes(x=deep,y=isolength,color=deep)) +
+  geom_boxplot() +
+  theme_classic(15) +
+  theme(plot.title = element_text(hjust = 0.5),strip.background = element_rect(fill = "white"),axis.text.x = element_text(color="black",size = 12),axis.text.y = element_text(color="black",size = 12)) +
+  facet_wrap(~group,ncol = 1)
+result$count <- 1
+### iso type
+ggplot(result, aes(x = deep,y=count,fill = isoType)) +
+  geom_bar(stat = "identity",width = 0.75, position = "fill") +
+  theme_classic(15) +
+  theme(plot.title = element_text(hjust = 0.5),strip.background = element_rect(fill = "white"),axis.text.x = element_text(color="black",size = 12),axis.text.y = element_text(color="black",size = 12)) +
+  facet_wrap(~group,ncol = 1) +
+  scale_fill_nejm()
+
+data <- read.table("http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/9_iso_vs_readscount/merge_isomiR_seq.tsv",header = T)
+df <- melt(data)
+df$deep <- gsub(".*\\.","",df$variable)
+df$sample <- gsub("\\..*","",df$variable)
+group <- data.frame(sample=unique(df$sample),group=c("AA","BL","Normal","Tis","CRC"))
+df <- merge(df,group,all.x = T)
+df <- df[df$isomiR_Sequence %in% unique(result$isomiR),]
+df$isoType <- unlist(lapply(df$isomiR_Sequence, function(id) judge_column(id)[[1]]))
+df <- melt(df)
+df <- df[df$deep %in% deeptype,]
+df <- df[,-7]
+df$deep <- factor(df$deep,levels = deeptype)
+ggplot(df, aes(x = deep,y=value,fill = isoType)) +
+  geom_bar(stat = "identity",width = 0.75, position = "fill") +
+  theme_classic(15) +
+  theme(plot.title = element_text(hjust = 0.5),strip.background = element_rect(fill = "white"),axis.text.x = element_text(color="black",size = 12),axis.text.y = element_text(color="black",size = 12)) +
+  facet_wrap(~group,ncol = 1) +
+  scale_fill_nejm()
+
+ggplot(result, aes(x = deep,color=deep,fill=deep)) +
+  geom_bar(stat = "count",width = 0.75) +
+  theme_classic(15) +
+  theme(plot.title = element_text(hjust = 0.5),strip.background = element_rect(fill = "white"),axis.text.x = element_text(color="black",size = 12),axis.text.y = element_text(color="black",size = 12)) + ylab("isomiRs Number") +
+  facet_wrap(~group,ncol = 1)
+```
+
+```{r isomiR_type_stats}
+judge_column <- function(id) {
+  # 将字符串按'_'分割
+  parts <- unlist(strsplit(id, '_'))
+  
+  # 提取各个部分
+  End5 <- parts[2]
+  End3 <- parts[3]
+  SNV <- parts[4]
+  
+  # 判断字符串属于哪一列
+  if ((End5 != '0') & (End3 == '0') & (SNV == '0')) {
+    return('judge_End5')
+  } else if ((End5 == '0') & (End3 != '0') & (SNV == '0')) {
+    return('judge_End3')
+  } else if ((End5 == '0') & (End3 == '0') & (SNV != '0')) {
+    return('judge_SNV')
+  } else if ((End5 == '0') & (End3 == '0') & (SNV == '0')) {
+    return('judge_Canonical')
+  } else {
+    return('judge_Mixed')
+  }
+}
+judge_column_mixed <- function(id) {
+  # 将字符串按'_'分割
+  parts <- unlist(strsplit(id, '_'))
+  
+  # 提取各个部分
+  End5 <- parts[2]
+  End3 <- parts[3]
+  SNV <- parts[4]
+  
+  # 判断字符串属于哪一列
+  if ((End5 != '0') & (End3 == '0') & (SNV == '0')) {
+    return('judge_End5')
+  } else if ((End5 == '0') & (End3 != '0') & (SNV == '0')) {
+    return('judge_End3')
+  } else if ((End5 == '0') & (End3 == '0') & (SNV != '0')) {
+    return('judge_SNV')
+  } else if ((End5 == '0') & (End3 == '0') & (SNV == '0')) {
+    return('judge_Canonical')
+  } else {
+    if ((End5 != '0') & (End3 == '0') & (SNV != '0')) {
+      return('judge_End5_and_SNV')
+    } else if ((End5 == '0') & (End3 != '0') & (SNV != '0')) {
+      return('judge_End3_and_SNV')
+    } else if ((End5 != '0') & (End3 != '0') & (SNV == '0')) {
+      return('judge_End5_and_End3')
+    } else {
+      return('judge_End5_and_End3_and_SNV')
+    }
+  }
+}
+data <- read.csv("http://10.30.10.200:10085/storeData/project/19-preRD_isomir_CRC/code_figures/3_isomiR%E5%BB%BA%E6%A8%A1%E7%9B%B8%E5%85%B3/matrix_generate/CPM_select.csv",row.names = 1)
+data$isoType <- rownames(data) %>% lapply(judge_column) %>% unlist()
+data <- data[data$isoType=="judge_Canonical",]
+data <- data[,-609]
+write.csv(data,"G:/work/make_data/CRC/model_result/paper-xu/paper_plot/isomiRs_CPM_select_mature_608.csv",row.names = T,quote = F)
+
+
+isoType <- read.csv("http://10.30.10.200:10085//storeData/project/user/anxiaolong/work/sortware/seq2isomiRs/find_isomirs/seq.ouf",sep = "\t")
+data$Sequnce <- rownames(data) %>% strsplit("_") %>% lapply(function(x) x[2]) %>% unlist()
+data$isomiRs <- rownames(data)
+dt <- base::merge(isoType,data,all.x = T)
+dt$Mean <- rowMeans(dt[,-c(1,2)])
+df <- dt %>% dplyr::select(Sequnce,ID,Mean)
+df$isoType <- df$ID %>% lapply(judge_column) %>% unlist()
+
+df$mixedType <- df$ID %>% lapply(judge_column_mixed) %>% unlist()
+df %>% group_by(mixedType) %>% summarise(value_sum = sum(Mean))
+
+dt$isoType <- dt$ID %>% lapply(judge_column) %>% unlist()
+dt <- dt[dt$isoType=="judge_Canonical",]
+df <- dt %>% select(isomiRs,names(dt)[3:610])
+df_unique <- unique(df[order(df$isomiRs), ])
+write.csv(df_unique,"G:/work/make_data/CRC/model_result/paper-xu/paper_plot/isomiRs_CPM_select_mature_608.csv",row.names = F,quote = F)
+pie_plot <- function(data,outfile){
+  stats_df$label <- paste("(",round(stats_df$value_sum/sum(stats_df$value_sum) * 100, 1), '%)', sep = '')
+  stats_df$label <- paste0(stats_df$isoType,stats_df$label)
+  p <- ggplot(stats_df, aes(x="", y=value_sum, fill=label))+
+    geom_bar(width = 1, stat = "identity",show.legend = T,color="white",size=1) +
+    coord_polar("y", start=0) +
+    theme_void() +
+    scale_fill_nejm(name="")
+  ggsave(filename = outfile,p,width = 6,height = 3)
+}
+stats_df <- df %>% group_by(isoType) %>% summarise(value_sum = sum(Mean))
+pie_plot(stats_df,"./paper/fig1/isoType_reads_percent_pie_plot.pdf")
+stats_df <- as.data.frame(table(df$isoType)) %>% rename(isoType=Var1,value_sum=Freq)
+pie_plot(stats_df,"./paper/fig1/isoType_freq_percent_pie_plot.pdf")
+
+stats_df <- df %>% filter(str_detect(isoType, "judge_Mixed")) %>% group_by(mixedType) %>% summarise(value_sum = sum(Mean)) %>% rename(isoType=mixedType)
+pie_plot(stats_df,"./paper/fig1/mixedType_reads_percent_pie_plot.pdf")
+stats_df <- as.data.frame(table(df$mixedType[df$isoType=="judge_Mixed"])) %>% rename(isoType=Var1,value_sum=Freq)
+pie_plot(stats_df,"./paper/fig1/mixedType_freq_percent_pie_plot.pdf")
+```
+
+## fig 2 
+
+### 差异火山图
+
+```{r vplot}
+de_cpm <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/de_genes_cpm_combat.rds"
+de_cpm <- readRDS(url(URLencode(de_cpm), "rb"))
+de_cpf <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/de_genes_irp_combat.rds"
+de_cpf <- readRDS(url(URLencode(de_cpf), "rb"))
+sampleNames <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/training_samples.rds"
+sampleNames <- readRDS(url(URLencode(sampleNames), "rb"))
+data <- read.csv("http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/12_UMI_mapping_position_directional_dedup_result/03.rerun.sum/isomiRs_833/CPM_IRP_select_combat.csv",row.names = 1)
+###火山图
+stats_fc_i <- de_cpf
+stats_fc_i$level = factor(ifelse(stats_fc_i$p.adjust < 0.01 & abs(stats_fc_i$logFC) >= log2(2), ifelse(stats_fc_i$logFC >= log2(2) ,'Up','Down'),'No'),levels=c('Up','Down','No'))
+if(all(c("Up","Down") %in% unique(stats_fc_i$level))){
+  color <- c("#DC143C","#00008B","#808080")
+}else if(all(c("Up") %in% unique(stats_fc_i$level))){
+  color <- c("#DC143C","#808080")
+}else if(all(c("Down") %in% unique(stats_fc_i$level))){
+  color <- c("#00008B","#808080")
+}
+p2 <- ggplot(stats_fc_i,aes(x=logFC,y=-log10(p.adjust),color=level))+
+  geom_point(size=3)+
+  scale_color_manual(values=color,name = "",labels=paste0(names(table(stats_fc_i$level)),"(",c(table(stats_fc_i$level)),")"))+
+  scale_size_continuous(name = "") +
+  theme_bw()+
+  theme(plot.title = element_text(size = 25),axis.title.x = element_text(size = 25),
+        axis.title.y = element_text(size = 25),axis.text.x = element_text(size = 25,color="black"),legend.text=element_text(size = 25),axis.text.y = element_text(size = 25,color="black"),panel.grid.major=element_blank(),panel.grid.minor=element_blank()) +
+  ylab('-log10 (p.adjust)')+
+  xlab('log2 (Fold Change)')+
+  geom_vline(xintercept=c(-log2(2),log2(2)),lty=2,col="black",lwd=0.5) +
+  geom_hline(yintercept = -log10(0.01),lty=2,col="black",lwd=0.5)
+
+ggsave(paste0("./paper/fig2/","de_cpf_padjust0.01_logfc2_volcaono.pdf"),p2,width = 6.5,height = 4)
+###venn和箱线图
+data <- data[,names(data) %in% sampleNames]
+x <- list(IRP=gsub("_irp","",rownames(de_cpf)),
+          IRE=gsub("_cpm","",rownames(de_cpm))
+)
+p1 <- ggvenn(x,show_percentage=F,stroke_size=0,set_name_size = 8,text_size = 8,fill_color = c("firebrick","royalblue"),fill_alpha = 0.7,auto_scale = T)
+ggsave("./paper/fig2/iso_cpf_cpm_venn_precent.pdf",p1,width = 5,height = 5)
+data$isomiRs <- rownames(data)
+dt <- melt(data)
+dt$group <- "IRP"
+dt$group[grepl("cpm",dt$isomiRs)] <- "IRE"
+Type <- read.csv("http://10.30.10.200:10085//storeData/project/user/anxiaolong/work/make_data/CRC/data_2/sample_data_608.csv")
+names(dt)[2] <- "sample"
+dt$isomiRs <- gsub("_irp|_cpm","",dt$isomiRs)
+dt <- merge(dt,Type,all.x = T)
+dt$Type <- gsub("1","Cancer",dt$Type)
+dt$Type <- gsub("0","Control",dt$Type)
+de_intersect <- intersect(gsub("_irp","",rownames(de_cpf)),gsub("_cpm","",rownames(de_cpm)))
+de_setdiff_cpf<- setdiff(gsub("_irp","",rownames(de_cpf)),gsub("_cpm","",rownames(de_cpm)))
+de_setdiff_cpm <- setdiff(gsub("_cpm","",rownames(de_cpm)),gsub("_irp","",rownames(de_cpf)))
+my_comparisons <- list(c("Control","Cancer"))
+library(ggpubr)
+for (i in c("de_intersect","de_setdiff_cpf","de_setdiff_cpm")) {
+  for (j in get(i)) {
+    df <- dt[dt$isomiRs==j,]
+    df$fc <- mean(df$value[which(df$Type=="Cancer" & df$group=="IRE")])/mean(df$value[which(df$Type=="Control" & df$group=="IRE")])
+    df$fc[which(df$group=="IRP")] <- mean(df$value[which(df$Type=="Cancer" & df$group=="IRP")])/mean(df$value[which(df$Type=="Control" & df$group=="IRP")])
+    df$y <- max(df$value)
+    df$y[which(df$group=="IRP")] <- max(df$value[which(df$group=="IRP")])
+    p <- ggplot(df,aes(x=Type,y=value,color = Type)) +
+      geom_boxplot(outlier.color = "white") + theme_bw() +
+      stat_compare_means(comparisons = my_comparisons,method = "wilcox.test",method.args=list(alternative="two.sided"),label="p.signif",vjust=1.5,hide.ns=T,size=5)+
+      stat_compare_means(comparisons = my_comparisons,method = "wilcox.test",method.args=list(alternative="two.sided"),label="p.format",vjust=0,hide.ns=T,size=3)+
+      #geom_point(aes(color=Type),position=position_jitterdodge(jitter.width =0.1))+
+      geom_jitter(width = 0.1,size=1) +
+      facet_wrap(.~group,ncol =3,scales = "free_y",shrink=FALSE) +
+      theme(strip.background=element_rect(color="black",fill="white"),strip.text=element_text(size = 25),legend.position = 'none',plot.title = element_text(size = 15,hjust = 0.5),axis.title.x = element_text(size = 25),
+                axis.title.y = element_text(size = 25),axis.text.x = element_text(size = 25,color="black"),legend.text=element_text(size = 25),axis.text.y = element_text(size = 25,color="black"),panel.grid.major=element_blank(),panel.grid.minor=element_blank())+
+      xlab("")+ylab("")+ labs(title = j) +
+      geom_text(aes(x=2.3,y=y,label=paste0("logFC: ",round(log2(fc),3))),color="black",check_overlap = T,vjust=-1.6,hjust=0.5,size=3) +
+      #geom_hline(yintercept = cut_off, color = 'red', size = 0.5,linetype="dashed") +
+      scale_color_manual(values = c("firebrick","steelblue"))  
+    ggsave(paste0("./paper/fig2/",i,"/",j,"_boxplot.pdf"),p,width = 8,height = 4.2)
+  }
+}
+path <- "./paper/fig2/de_setdiff_cpf/"
+files <- list.files(path,"*",recursive = T,full.names = T)
+qpdf::pdf_combine(files,paste0("./paper/fig2/","de_setdiff_cpf_all_boxplot.pdf"))
+
+path <- "./paper/fig2/"
+files <- list.files(path,"de_intersect.*",recursive = T,full.names = T)
+qpdf::pdf_combine(files,paste0("./paper/fig2/","de_intersect_all_boxplot.pdf"))
+```
+
+### 差异iso与TCGA比较
+
+```{r TCGA}
+data <- read.csv("http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/12_UMI_mapping_position_directional_dedup_result/03.rerun.sum/isomiRs_833/CPM_IRP_select_combat.csv",row.names = 1)
+de_cpm <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/de_genes_cpm_combat.rds"
+de_cpm <- readRDS(url(URLencode(de_cpm), "rb"))
+de_cpf <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/de_genes_irp_combat.rds"
+de_cpf <- readRDS(url(URLencode(de_cpf), "rb"))
+
+raw_ruvg <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/raw_ruvg_edger_result.rds"
+raw_ruvg <- readRDS(url(URLencode(raw_ruvg), "rb"))
+raw_ruvg$level <- get_diff_level(raw_ruvg)
+de_TCGA <- "http://10.30.10.200:10085//storeData/project/user/anxiaolong/work/make_data/CRC/model_result/TCGA/data/TCGA_CRC_expression_label_select_0.1_5_genes_result.rds"
+de_TCGA <- readRDS(url(URLencode(de_TCGA), "rb"))
+
+de_family <- "http://10.30.10.200:10085//storeData/project/user/anxiaolong/work/make_data/CRC/model_result/paper-xu/paper_plot/fig2/de_genes_family_combat.rds"
+de_family <- readRDS(url(URLencode(de_family), "rb"))
+
+filter_seq <- rownames(raw_ruvg) %>% lapply(function(x) strsplit(x,"_")[[1]][2]) %>% unlist() %>% unique()
+TCGA_seq <- gsub("_.*","",rownames(de_TCGA))
+x <- list(MyData=filter_seq,
+          TCGA=TCGA_seq
+)
+p1 <- ggvenn(x,show_percentage=F,stroke_size=0,set_name_size = 8,text_size = 8,fill_color = c("firebrick","royalblue","orange"),fill_alpha = 0.7,auto_scale = T) +
+  scale_y_continuous(limits = c(-1.5,1.5))
+ggsave("./paper/fig2/raw_ruvg_iso_filter_seq_mydata_TCGA_venn_precent.pdf",p1,width = 5,height = 5)
+inter_seq <- intersect(filter_seq,TCGA_seq)
+de_TCGA <- de_TCGA[gsub("_.*","",rownames(de_TCGA)) %in% inter_seq,]
+de_TCGA <- de_TCGA[de_TCGA$Regulation!="No",]
+cpf_seq <- rownames(de_cpf) %>% lapply(function(x) strsplit(x,"_")[[1]][2]) %>% unlist()
+cpm_seq <- rownames(de_cpm) %>% lapply(function(x) strsplit(x,"_")[[1]][2]) %>% unlist()
+cpf_seq <- cpf_seq[cpf_seq %in% inter_seq]
+cpm_seq <- cpm_seq[cpm_seq %in% inter_seq]
+
+raw_ruvg <- raw_ruvg[raw_ruvg$level!="No",]
+raw_ruvg_seq <- rownames(raw_ruvg) %>% lapply(function(x) strsplit(x,"_")[[1]][2]) %>% unlist()
+raw_ruvg_seq <- raw_ruvg_seq[raw_ruvg_seq %in% inter_seq]
+raw_ruvg$seq <- rownames(raw_ruvg) %>% lapply(function(x) strsplit(x,"_")[[1]][2]) %>% unlist()
+raw_ruvg <- raw_ruvg[raw_ruvg$seq %in% raw_ruvg_seq,]
+TCGA_seq <- gsub("_.*","",rownames(de_TCGA))
+de_TCGA$seq <- gsub("_.*","",rownames(de_TCGA))
+de_TCGA <- de_TCGA[!de_TCGA$seq %in% c("CTGGCTCAGTTCAGCAGGAAC","CTGGCTCAGTTCAGCAGGAACA"),]
+TCGA_seq <- TCGA_seq[!TCGA_seq %in% c("CTGGCTCAGTTCAGCAGGAAC","CTGGCTCAGTTCAGCAGGAACA")]
+x <- list(Ruvg=raw_ruvg_seq,
+          TCGA=TCGA_seq
+)
+p1 <- ggvenn(x,show_percentage=F,stroke_size=0,set_name_size = 8,text_size = 8,fill_color = c("firebrick","royalblue","orange"),fill_alpha = 0.7,auto_scale = F) +
+  scale_y_continuous(limits = c(-1.5,1.5))
+
+ggsave("./paper/fig2/iso_diff_raw_ruvg_TCGA_venn_precent.pdf",p1,width = 5,height = 5)
+
+intersect(intersect(cpf_seq,cpm_seq),TCGA_seq)
+de_cpf$seq <- rownames(de_cpf) %>% lapply(function(x) strsplit(x,"_")[[1]][2]) %>% unlist()
+rownames(de_cpf)[de_cpf$seq %in% intersect(intersect(cpf_seq,cpm_seq),TCGA_seq)] 
+
+cpm_group <- rownames(de_cpm) %>% lapply(function(x) strsplit(x,"_")[[1]][3]) %>% unlist() %>% unique()
+family <- de_family$feature[!de_family$level=="No"]
+x <- list(isomiRs=cpm_group,
+          miRNAs=family
+)
+p1 <- ggvenn(x,show_percentage=F,stroke_size=0,set_name_size = 8,text_size = 8,fill_color = c("firebrick","royalblue","orange"),fill_alpha = 0.7,auto_scale = T)
+ggsave("./paper/fig2/iso_family_cpm_venn_precent.pdf",p1,width = 5,height = 5)
+x <- list(raw_ruvg_Down = raw_ruvg$seq,
+          TCGA_Down = de_TCGA$seq[de_TCGA$Regulation=="Down"],
+          TCGA_Up = de_TCGA$seq[de_TCGA$Regulation=="Up"])
+p1 <- ggvenn(x,show_percentage=F,stroke_size=0,set_name_size = 8,text_size = 8,fill_color = c("firebrick","royalblue","orange"),fill_alpha = 0.7,auto_scale = F) +
+  scale_y_continuous(limits = c(-2,2))
+ggsave("./paper/fig2/iso_family_cpm_venn_precent_Up_Down.pdf",p1,width = 7,height = 7)
+```
+
+### 差异热图和pca图
+
+```{r heatmap_group}
+group <- readxl::read_xlsx("G:/work/make_data/CRC/data_2/CRC_最终版(2).xlsx",sheet = "汇总")
+names(group)[1] <- "sample"
+group$性别 <- gsub("男","Male",group$性别)
+group$性别 <- gsub("女","Female",group$性别)
+group$建模分组 <- gsub("normal","Normal",group$建模分组)
+group$建模分组 <- gsub("benign lesions","NAA",group$建模分组)
+group$建模分组 <- gsub("CRC-stageIII|CRC-stageIV","CRC III/IV",group$建模分组)
+group$建模分组 <- gsub("CRC-stageI|CRC-stageII","CRC I/II",group$建模分组)
+
+group$Type <- group$建模分组
+group$Type <- gsub("Normal|NAA","Control",group$Type)
+group$Type <- gsub("CRC I/II|CRC III/IV","Cancer",group$Type)
+ann_col <- data.frame(row.names = group$sample,Type=group$Type,Stage=group$建模分组,Age=group$年龄,Gender=group$性别)
+type_cor <- c("steelblue","#ADB6B6FF","firebrick")
+names(type_cor) <- c("Control","AA","Cancer")
+gender_col <- c('orchid','orange')
+names(gender_col) <- c("Female","Male")
+# stage_col <- c("Normal" = "#42B540FF", "Benign lesions" = "#0099B4FF","NAA" = "#00468BFF","AA" = "#ADB6B6FF", "CRC" = "#FDAF91FF", "CRC-stageI" ="tomato" , "CRC-stageII" = "#ED0000FF", "CRC-stageIII" = "#AD002AFF", "CRC-stageIV" = "#925E9FFF")
+stage_col <- c("Normal" = "#42B540FF","NAA" = "#00468BFF","AA" = "#ADB6B6FF", "CRC I/II" = "#AD002AFF", "CRC III/IV" = "#925E9FFF")
+all_col <- list(Type=type_cor,Gender=gender_col,Stage=stage_col)
+# ann_col$Stage <- factor(ann_col$Stage,levels = c("Normal","Benign lesions","NAA","AA","CRC","CRC-stageI","CRC-stageII","CRC-stageIII","CRC-stageIV"))
+# ann_col$Stage <- factor(ann_col$Stage,levels = c("Normal","NAA","AA","CRC I/II","CRC III/IV"))
+
+all_ann_col <- ann_col[which(ann_col$Type %in% c("Control","AA","Cancer")),]
+```
+
+```{r get_wilcox_diff}
+get_stats_result <- function(data_count, diff, Type, pv=0.01, fcv=2, method="t.test", filter_feture=rownames(data_count)){
+  # iso_cpm <- get_cpm(data_count)
+  iso_cpm <- data_count
+  iso_cpm <- iso_cpm[rownames(iso_cpm) %in% filter_feture,]
+  
+  group1_samples <- names(iso_cpm) %in% group$Sample[group[[Type]] == diff[2]]
+  group2_samples <- names(iso_cpm) %in% group$Sample[group[[Type]] == diff[1]]
+  
+  group1_means <- rowMeans(iso_cpm[, group1_samples])
+  group2_means <- rowMeans(iso_cpm[, group2_samples])
+  
+  fc <- group1_means / group2_means
+  if(method=="wald.test"){
+    result$p.value <- apply(iso_cpm, 1, function(row) {
+      fit <- lm(row[group1_samples] ~ row[group2_samples])
+      wald.test(b = coef(fit), Sigma = vcov(fit), Terms = 2)[["result"]][["chi2"]][["P"]]
+    })
+  }else {
+     p.value <- apply(iso_cpm, 1, function(row) match.fun(method)(row[group1_samples], row[group2_samples])$p.value)
+  }
+  group.1 <- as.numeric(rowSums(iso_cpm[, group1_samples]< 5))/as.numeric(sum(group1_samples))
+  group.2 <- as.numeric(rowSums(iso_cpm[, group2_samples]< 5))/as.numeric(sum(group2_samples))
+  
+  result <- data.frame(
+    feature = rownames(iso_cpm), 
+    FC = fc, 
+    p.value = p.value,
+    logFC = log2(fc),
+    FDR = p.adjust(p.value, method = 'fdr'),
+    level = factor(ifelse(p.adjust(p.value, method = 'fdr') < pv & abs(log2(fc)) >= log2(fcv), ifelse(log2(fc) >= log2(fcv) ,'Up','Down'),'No'),levels=c('Up','Down','No')),
+    group1_means = group1_means,
+    group1_count = as.numeric(rowSums(iso_cpm[, group1_samples]< 5)),
+    group1_sample = as.numeric(sum(group1_samples)),
+    group1_rate = group.1,
+    group2_means = group2_means,
+    group2_count = as.numeric(rowSums(iso_cpm[, group2_samples]< 5)),
+    group2_sample = as.numeric(sum(group2_samples)),
+    group2_rate = group.2
+  )
+  names(result)[names(result) == "group1_means"] <- paste0(diff[1],"_Mean")
+  names(result)[names(result) == "group1_count"] <- paste0(diff[1],"_count(<5)")
+  names(result)[names(result) == "group1_sample"] <- paste0(diff[1],"_sample")
+  names(result)[names(result) == "group1_rate"] <- paste0(diff[1],"_rate(<5)")
+  names(result)[names(result) == "group2_means"] <- paste0(diff[2],"_Mean")
+  names(result)[names(result) == "group2_count"] <- paste0(diff[2],"_count(<5)")
+  names(result)[names(result) == "group2_sample"] <- paste0(diff[2],"_sample")
+  names(result)[names(result) == "group2_rate"] <- paste0(diff[2],"_rate(<5)")
+  
+  return(result)
+}
+get_edgeR_result <- function(data_count, diff, Type, pv=0.01, fcv=2, filter_feture=rownames(data_count)) {
+  group1_samples <- names(data_count) %in% group$Sample[group[[Type]] == diff[2]]
+  group2_samples <- names(data_count) %in% group$Sample[group[[Type]] == diff[1]]
+  data_count <- data_count[rownames(data_count) %in% filter_feture, group1_samples|group2_samples]
+  label <- factor(diff)
+  label <- group[which(group[[Type]] %in% diff),]
+  label <- data.frame(row.names = rownames(label),condition=label[[Type]])
+  condition <- factor(label[["condition"]],levels = diff)
+  y <- DGEList(counts=data_count, group=condition)
+  y <- calcNormFactors(y)
+  design <- model.matrix(~condition)
+  y <- estimateDisp(y, design)
+  fit <- glmQLFit(y, design)
+  res <- glmQLFTest(fit, coef=2)
+  group1_samples <- group$Sample[group[[Type]] == diff[1]]
+  group2_samples <- group$Sample[group[[Type]] == diff[2]]
+  group1_means <- rowMeans(data_count[, group1_samples])
+  group2_means <- rowMeans(data_count[, group2_samples])
+  
+  fc <- 2^(res$table$logFC)
+  p.value <- res$table$PValue
+  fdr <- p.adjust(p.value, method = 'fdr')
+  
+  group.1 <- as.numeric(rowSums(data_count[, group1_samples] < 5)) / as.numeric(length(group1_samples))
+  group.2 <- as.numeric(rowSums(data_count[, group2_samples] < 5)) / as.numeric(length(group2_samples))
+
+  result <- data.frame(
+    feature = rownames(res$table),
+    FC = fc,
+    p.value = p.value,
+    logFC = res$table$logFC,
+    FDR = fdr,
+    level = factor(ifelse(p.value < pv & abs(log2(fc)) >= log2(fcv), ifelse(log2(fc) >= log2(fcv), 'Up', 'Down'), 'No'), levels = c('Up', 'Down', 'No')),
+    group1_means = group1_means,
+    group1_count = as.numeric(rowSums(data_count[, group1_samples] < 5)),
+    group1_sample = as.numeric(length(group1_samples)),
+    group1_rate = group.1,
+    group2_means = group2_means,
+    group2_count = as.numeric(rowSums(data_count[, group2_samples] < 5)),
+    group2_sample = as.numeric(length(group2_samples)),
+    group2_rate = group.2
+  )
+  
+  names(result)[names(result) == "group1_means"] <- paste0(diff[1], "_Mean")
+  names(result)[names(result) == "group1_count"] <- paste0(diff[1], "_count(<5)")
+  names(result)[names(result) == "group1_sample"] <- paste0(diff[1], "_sample")
+  names(result)[names(result) == "group1_rate"] <- paste0(diff[1], "_rate(<5)")
+  names(result)[names(result) == "group2_means"] <- paste0(diff[2], "_Mean")
+  names(result)[names(result) == "group2_count"] <- paste0(diff[2], "_count(<5)")
+  names(result)[names(result) == "group2_sample"] <- paste0(diff[2], "_sample")
+  names(result)[names(result) == "group2_rate"] <- paste0(diff[2], "_rate(<5)")
+  
+  return(result)
+}
+data <- read.csv("http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/12_UMI_mapping_position_directional_dedup_result/03.rerun.sum/miRNAs_833/CPM_select_combat_833.csv",header = T,check.names = F,row.names = 1)
+data <- read.csv("http://10.30.10.200:10085//storeData/project/user/anxiaolong/work/make_data/CRC/model_result/paper-xu/paper_plot/isomiRs_CPM_select_mature_608.csv",header = T,check.names = F,row.names = 1)
+# names(data) <- gsub("R03|-.*","",names(data))
+sampleNames <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/training_samples.rds"
+sampleNames <- readRDS(url(URLencode(sampleNames), "rb"))
+data <- data[,names(data) %in% sampleNames]
+group <- all_ann_col[rownames(all_ann_col) %in% names(data),]
+group$Sample <- rownames(group)
+result <- get_stats_result(data_count = data,diff = c("Cancer","Control"),Type = "Type",method = "wilcox.test")
+saveRDS(result,"G:/work/make_data/CRC/model_result/paper-xu/paper_plot/de_isomiRs_CPM_select_mature_608.rds")
+write.csv(result,"G:/work/make_data/CRC/model_result/paper-xu/paper_plot/de_isomiRs_CPM_select_mature_608.csv",row.names = F,quote = F)
+###iso各分期差异
+data <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/exp_matrix_list.rds"
+data <- readRDS(url(URLencode(data), "rb"))
+data <- data[["raw_ruvg"]] %>% as.data.frame()
+all_ann_col <- ann_col[which(ann_col$Type %in% c("Control","AA","SSA","Cancer")),]
+all_ann_col$Stage[all_ann_col$Stage =="SSA"] <- "AA"
+Names <- c("de_NAA","de_AA","de_CRC12","de_CrC34")
+diff <- list(c("NAA","Normal"),c("AA","NAA"),c("CRC I/II","AA"),c("CRC III/IV","CRC I/II"))
+group <- all_ann_col
+group$Sample <- rownames(group)
+for (i in c(1:4)) {
+  assign(Names[i],get_edgeR_result(data_count = data,pv = 0.05,fcv = 2,diff = diff[[i]],Type = "Stage"))
+  ###火山图
+  stats_fc_i <- get(Names[i])
+  if(all(c("Up","Down") %in% unique(stats_fc_i$level))){
+    color <- c("#DC143C","#00008B","#808080")
+  }else if(all(c("Up") %in% unique(stats_fc_i$level))){
+    color <- c("#DC143C","#808080")
+  }else if(all(c("Down") %in% unique(stats_fc_i$level))){
+    color <- c("#00008B","#808080")
+  }
+  p2 <- ggplot(stats_fc_i,aes(x=logFC,y=-log10(p.value),color=level))+
+    geom_point(size=3)+
+    scale_color_manual(values=color,name = "",labels=paste0(names(table(stats_fc_i$level)),"(",c(table(stats_fc_i$level)),")"))+
+    scale_size_continuous(name = "") +
+    theme_bw()+
+    theme(plot.title = element_text(size = 25),axis.title.x = element_text(size = 25),
+          axis.title.y = element_text(size = 25),axis.text.x = element_text(size = 25,color="black"),legend.text=element_text(size = 25),axis.text.y = element_text(size = 25,color="black"),panel.grid.major=element_blank(),panel.grid.minor=element_blank()) +
+    ylab('-log10 (p.value)')+
+    xlab('log2 (Fold Change)')+
+    geom_vline(xintercept=c(-log2(2),log2(2)),lty=2,col="black",lwd=0.5) +
+    geom_hline(yintercept = -log10(0.05),lty=2,col="black",lwd=0.5)
+  
+  ggsave(paste0("./paper/fig2/",Names[i],"_padjust0.05_logfc2_volcaono.pdf"),p2,width = 6.5,height = 4)
+  # de_family <- result[!result$level=="No",]
+# for (i in c("de_family")) {
+    re <- get(Names[i])[get(Names[i])[["level"]]!="No",]
+    train <- data[rownames(data) %in% rownames(re),group$Sample[group$Stage %in% diff[[i]]]]
+    
+    cor <- cor(train,method = 'spearman')
+    ann_col <- group[,!names(group) %in% c("Type","Sample")]
+    col <- all_col
+    ann_col <- ann_col[which(rownames(ann_col) %in% names(train)),]
+    col$Stage <- col$Stage[which(names(col$Stage) %in% diff[[i]])]
+    col$Type <- NULL
+    train <- train %>% dplyr::select(group$Sample[group$Stage %in% diff[[i]][2]],group$Sample[group$Stage %in% diff[[i]][1]])
+
+    pca <- prcomp(as.data.frame(t(train)),rank. = 10,center = T,scale=T)
+    summ1 <- summary(pca)
+    xlab1 <- paste0("PC1(",round(summ1$importance[2,1]*100,2),"%)")
+    ylab1 <- paste0("PC2(",round(summ1$importance[2,2]*100,2),"%)")
+    pca_x <- as.data.frame(pca$x)
+    pca_x$Sample <- rownames(pca_x)
+    pca_x <- merge(pca_x,group,by="Sample",all.x = T)
+    # asw_cpm_combat = average_silhouette_width_batch(pca_x[, 2:11], pca_x$Type, metric = 'cosine')
+    # pca_x$分期[which(pca_x$分期=="CRC III/IV")] <- ""
+    # pca_x$分期[which(pca_x$分期=="Health")] <- ""
+    # pca_x$分期[which(pca_x$分期=="High risk")] <- "NC"
+    p <- ggplot(pca_x, aes(x = PC1, y = PC2, fill = Stage,starshape=Stage)) +
+      # geom_point(size=3) +
+      geom_star(size=3,aes(fill=Stage,color=Stage),show.legend = T,starstroke=0) + 
+      stat_ellipse(aes(x = PC1, y = PC2,group=Stage,color=Stage),size = 0.5,level = 0.95,inherit.aes = F,show.legend = F)+
+      # geom_text_repel(aes(label = gsub("CRC ","",分期)), size = 5, show.legend = F)+
+      theme_bw() + xlab(xlab1) + ylab(ylab1) + labs(title = "") +
+      theme(legend.position = "top",legend.title = element_blank()) +
+      theme(plot.title = element_text(size = 25),axis.title.x = element_text(size = 25),
+    axis.title.y = element_text(size = 25),axis.text.x = element_text(size = 25,color="black"),legend.text=element_text(size = 25),axis.text.y = element_text(size = 25,color="black"),panel.grid.major=element_blank(),panel.grid.minor=element_blank()) +
+      scale_color_manual(values = c("firebrick","steelblue"),name='') +
+      scale_fill_manual(values = c("firebrick","steelblue"),name='') +
+      scale_starshape_manual(values = c(15,29),name='')
+    ggsave(paste0("./paper/fig2/","/",Names[i],"_train_preprocess_exp_pca.pdf"),p,width = 5,height = 5)
+    # p1 <- pheatmap::pheatmap(cor,show_rownames = F,show_colnames = F,cutree_rows = 2,cutree_cols = 2,cluster_cols = T,annotation_col = ann_col,annotation_colors = col,color = colorRampPalette(colors = c('steelblue','white' ,'firebrick'))(100),scale = "none",clustering_method = "ward.D2",legend_breaks=c(-1:1),breaks=seq(-1,1,0.02))
+    # ggsave(paste0(path,"/diff/train_preprocess_cor_heatmap.pdf"),p1,width = 6,height = 4)
+    p2 <- pheatmap::pheatmap(train,show_rownames = F,show_colnames = F,cluster_cols = F,annotation_col = ann_col,annotation_colors = col,color = colorRampPalette(colors = c('steelblue','white' ,'firebrick'))(100),scale = "row",clustering_method = "complete",treeheight_row=100,clustering_distance_rows = "euclidean",legend_breaks=c(-5:5),breaks=seq(-5,5,0.1))
+    ggsave(paste0("./paper/fig2/","/",Names[i],"_train_preprocess_exp_heatmap.pdf"),p2,width = 6,height = 4)
+    p3 <- pheatmap::pheatmap(train,show_rownames = F,show_colnames = F,cluster_cols = T,annotation_col = ann_col,annotation_colors = col,color = colorRampPalette(colors = c('steelblue','white' ,'firebrick'))(100),scale = "row",clustering_method = "complete",treeheight_row=100,clustering_distance_rows = "euclidean",legend_breaks=c(-5:5),breaks=seq(-5,5,0.1))
+    ggsave(paste0("./paper/fig2/","/",Names[i],"_train_preprocess_exp_heatmap_cluster.pdf"),p3,width = 6,height = 4)
+}
+                  
+```
+
+```{r train_diff_heatmap_cor}
+library(proxy)
+library(cluster)
+average_silhouette_width_batch <- function(data, batch_labels, metric = 'cosine') {
+  # Ensure batch_labels is a factor
+  batch_labels <- as.factor(batch_labels)
+  
+  # Compute the distance matrix
+  dist_matrix <- proxy::dist(data, method = metric)
+  
+  # Convert batch_labels to numeric
+  numeric_labels <- as.numeric(batch_labels)
+  
+  # Calculate silhouette widths
+  sil_width <- as.data.frame(silhouette(numeric_labels, dist_matrix))
+  
+  # Calculate the average silhouette width for each batch
+  unique_batches <- unique(numeric_labels)
+  batch_silhouette_scores <- numeric(length(unique_batches))
+  
+  for (i in seq_along(unique_batches)) {
+    batch <- unique_batches[i]
+    batch_mask <- numeric_labels == batch
+    batch_silhouette_scores[i] <- mean(sil_width[sil_width$cluster == batch, "sil_width"])
+  }
+  
+  # Calculate the overall average silhouette width
+  average_silhouette <- mean(batch_silhouette_scores)
+  
+  # Return the average silhouette widths for each batch and the overall average
+  return(list(
+    batch_silhouette_scores = batch_silhouette_scores,
+    overall_average_silhouette = average_silhouette
+  ))
+}
+###基于差异基因的热图
+iso <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/raw_ruvg_edger_result.rds"
+iso <- readRDS(url(URLencode(iso), "rb"))
+mature <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/mature_raw_ruvg_edger_result.rds"
+mature <- readRDS(url(URLencode(mature), "rb"))
+isogroup <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/isogroup_raw_ruvg_edger_result.rds"
+isogroup <- readRDS(url(URLencode(isogroup), "rb"))
+
+data <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/exp_matrix_list.rds"
+data <- readRDS(url(URLencode(data), "rb"))
+
+sample_info <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/sample_info.rds"
+sample_info <- readRDS(url(URLencode(sample_info), "rb"))
+sample_info <- sample_info %>% select(sample,院区,miRNA测序芯片号,year) %>% rename(Source=院区,Chip=miRNA测序芯片号,Year=year)
+sample_info$Source <- gsub(" .*","",sample_info$Source)
+sample_info$Source[sample_info$Source=="解放"] <- "解放路"
+sample_info$Source[sample_info$Source=="滨江"] <- "BinJiang"
+sample_info$Source[sample_info$Source=="城东"] <- "ChengDong"
+sample_info$Source[sample_info$Source=="嘉善海宁"] <- "JiaShan"
+sample_info$Source[sample_info$Source=="解放路"] <- "JieFang"
+get_diff_level <- function(iso) {return(factor(ifelse(iso[["PValue"]] < 0.05 & abs(iso[["logFC"]]) > 1, ifelse( iso[["logFC"]] > 1 ,'Up','Down'),'No'),levels=c('Up','Down','No')))}
+iso$level <- get_diff_level(iso)
+mature$level <- get_diff_level(mature)
+isogroup$level <- get_diff_level(isogroup)
+sampleNames <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/training_samples.rds"
+sampleNames <- readRDS(url(URLencode(sampleNames), "rb"))
+raw_ruvg <- as.data.frame(data[["raw_ruvg"]])
+raw_ruvg <- raw_ruvg[,names(raw_ruvg) %in% sampleNames]
+raw <- as.data.frame(data[["raw_data"]])
+raw <- raw[,names(raw) %in% sampleNames]
+cpm <- as.data.frame(data[["cpm"]])
+cpm <- cpm[,names(cpm) %in% sampleNames]
+###标准化方法之间比较pca
+for (i in c("raw","raw_ruvg","cpm")) {
+    train <- get(i)
+    cor <- cor(train,method = 'spearman')
+    ann_col <- all_ann_col
+    col <- all_col
+    ann_col <- ann_col[which(rownames(ann_col) %in% names(train)),]
+    group <- ann_col
+    group$sample <- rownames(group)
+    pca <- prcomp(as.data.frame(t(train)),rank. = 10,center = T,scale=T)
+    summ1 <- summary(pca)
+    xlab1 <- paste0("PC1(",round(summ1$importance[2,1]*100,2),"%)")
+    ylab1 <- paste0("PC2(",round(summ1$importance[2,2]*100,2),"%)")
+    pca_x <- as.data.frame(pca$x)
+    pca_x$sample <- rownames(pca_x)
+    pca_x <- merge(pca_x,group,by="sample",all.x = T)
+    pca_x <- merge(pca_x,sample_info,by="sample",all.x = T)
+    asw_cpm_combat = average_silhouette_width_batch(pca_x[, 2:3], pca_x$Type, metric = 'cosine')
+    print(asw_cpm_combat$overall_average_silhouette)
+    # pca_x$分期[which(pca_x$分期=="CRC III/IV")] <- ""
+    # pca_x$分期[which(pca_x$分期=="Health")] <- ""
+    # pca_x$分期[which(pca_x$分期=="High risk")] <- "NC"
+    p <- ggplot(pca_x, aes(x = PC1, y = PC2, fill = Source,starshape=Type)) +
+      # geom_point(size=3) +
+      geom_star(size=3,aes(fill=Source,color=Source),show.legend = T,starstroke=0) + 
+      stat_ellipse(aes(x = PC1, y = PC2,group=Source,color=Source),size = 0.5,level = 0.95,inherit.aes = F,show.legend = F)+
+      # geom_text_repel(aes(label = gsub("CRC ","",分期)), size = 5, show.legend = F)+
+      theme_bw() + xlab(xlab1) + ylab(ylab1) + labs(title = "") +
+      theme(legend.position = "right",legend.title = element_blank()) +
+      theme(plot.title = element_text(size = 25),axis.title.x = element_text(size = 25),
+    axis.title.y = element_text(size = 25),axis.text.x = element_text(size = 25,color="black"),legend.text=element_text(size = 25),axis.text.y = element_text(size = 25,color="black"),panel.grid.major=element_blank(),panel.grid.minor=element_blank()) +
+      scale_color_nejm(name='') +
+      scale_fill_nejm(name='') +
+      scale_starshape_manual(values = c(15,29),name='')
+    ggsave(paste0("./paper/fig2/","/",i,"_train_preprocess_Souorce_pca.pdf"),p,width = 7.5,height = 5)
+    
+    p <- ggplot(pca_x, aes(x = PC1, y = PC2, fill = Year,starshape=Type)) +
+      # geom_point(size=3) +
+      geom_star(size=3,aes(fill=Year,color=Year),show.legend = T,starstroke=0) + 
+      stat_ellipse(aes(x = PC1, y = PC2,group=Year,color=Year),size = 0.5,level = 0.95,inherit.aes = F,show.legend = F)+
+      # geom_text_repel(aes(label = gsub("CRC ","",分期)), size = 5, show.legend = F)+
+      theme_bw() + xlab(xlab1) + ylab(ylab1) + labs(title = "") +
+      theme(legend.position = "right",legend.title = element_blank()) +
+      theme(plot.title = element_text(size = 25),axis.title.x = element_text(size = 25),
+    axis.title.y = element_text(size = 25),axis.text.x = element_text(size = 25,color="black"),legend.text=element_text(size = 25),axis.text.y = element_text(size = 25,color="black"),panel.grid.major=element_blank(),panel.grid.minor=element_blank()) +
+      scale_color_nejm(name='') +
+      scale_fill_nejm(name='') +
+      scale_starshape_manual(values = c(15,29),name='')
+    ggsave(paste0("./paper/fig2/","/",i,"_train_preprocess_Year_pca.pdf"),p,width = 7.5,height = 5)   
+
+    p <- ggplot(pca_x, aes(x = PC1, y = PC2, fill = Chip,starshape=Type)) +
+      # geom_point(size=3) +
+      geom_star(size=3,aes(fill=Chip,color=Chip),show.legend = T,starstroke=0) + 
+      stat_ellipse(aes(x = PC1, y = PC2,group=Chip,color=Chip),size = 0.5,level = 0.95,inherit.aes = F,show.legend = F)+
+      # geom_text_repel(aes(label = gsub("CRC ","",分期)), size = 5, show.legend = F)+
+      theme_bw() + xlab(xlab1) + ylab(ylab1) + labs(title = "") +
+      theme(legend.position = "right",legend.title = element_blank()) +
+      theme(plot.title = element_text(size = 25),axis.title.x = element_text(size = 25),
+    axis.title.y = element_text(size = 25),axis.text.x = element_text(size = 25,color="black"),legend.text=element_text(size = 25),axis.text.y = element_text(size = 25,color="black"),panel.grid.major=element_blank(),panel.grid.minor=element_blank()) +
+      #scale_color_nejm(name='') +
+      #scale_fill_nejm(name='') +
+      scale_starshape_manual(values = c(15,29),name='')
+    p <- p + guides(color = guide_legend(ncol = 2),fill = guide_legend(ncol = 2))
+    ggsave(paste0("./paper/fig2/","/",i,"_train_preprocess_Chip_pca.pdf"),p,width = 14,height = 6)   
+
+    p <- ggplot(pca_x, aes(x = PC1, y = PC2, fill = Type)) +
+      # geom_point(size=3) +
+      geom_star(size=3,aes(fill=Type,color=Type),show.legend = T,starstroke=0) + 
+      stat_ellipse(aes(x = PC1, y = PC2,group=Type,color=Type),size = 0.5,level = 0.95,inherit.aes = F,show.legend = F)+
+      # geom_text_repel(aes(label = gsub("CRC ","",分期)), size = 5, show.legend = F)+
+      theme_bw() + xlab(xlab1) + ylab(ylab1) + labs(title = "") +
+      theme(legend.position = "right",legend.title = element_blank()) +
+      theme(plot.title = element_text(size = 25),axis.title.x = element_text(size = 25),
+    axis.title.y = element_text(size = 25),axis.text.x = element_text(size = 25,color="black"),legend.text=element_text(size = 25),axis.text.y = element_text(size = 25,color="black"),panel.grid.major=element_blank(),panel.grid.minor=element_blank()) +
+      scale_color_nejm(name='') +
+      scale_fill_nejm(name='') +
+      scale_starshape_manual(values = c(15,29),name='')
+    ggsave(paste0("./paper/fig2/","/",i,"_train_preprocess_Type_pca.pdf"),p,width = 7.5,height = 5) 
+}
+# data <- read.csv("http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/12_UMI_mapping_position_directional_dedup_result/03.rerun.sum/isomiRs_833/CPM_IRP_select_combat.csv",row.names = 1)
+# data <- data[,names(data) %in% sampleNames]
+# de_cpm <- de_cpm[order(-abs(de_cpm$logFC), de_cpm$p.adjust), ]
+# de_cpf <- de_cpf[order(-abs(de_cpf$logFC), de_cpf$p.adjust), ]
+# de_cpm_200 <- de_cpm[1:200,]
+# de_cpf_200 <- de_cpf[1:200,]
+iso_data <- as.data.frame(data[["raw_ruvg"]])
+iso_data <- iso_data[,names(iso_data) %in% sampleNames]
+mature_data <- as.data.frame(data[["mature_raw_ruvg"]])
+mature_data <- mature_data[,names(mature_data) %in% sampleNames]
+isogroup_data <- as.data.frame(data[["isogroup_raw_ruvg"]])
+isogroup_data <- isogroup_data[,names(isogroup_data) %in% sampleNames]
+for (i in c("iso","mature","isogroup")) {
+    stats_fc_i <- get(i)
+    if(all(c("Up","Down") %in% unique(stats_fc_i$level))){
+      color <- c("#DC143C","#00008B","#808080")
+    }else if(all(c("Up") %in% unique(stats_fc_i$level))){
+      color <- c("#DC143C","#808080")
+    }else if(all(c("Down") %in% unique(stats_fc_i$level))){
+      color <- c("#00008B","#808080")
+    }
+    p2 <- ggplot(stats_fc_i,aes(x=logFC,y=-log10(PValue),color=level))+
+      geom_point(size=3,alpha=1)+
+      scale_color_manual(values=color,name = "",labels=paste0(names(table(stats_fc_i$level)),"(",c(table(stats_fc_i$level)),")"))+
+      scale_size_continuous(name = "") +
+      theme_bw()+
+      theme(plot.title = element_text(size = 25),axis.title.x = element_text(size = 25),
+            axis.title.y = element_text(size = 25),axis.text.x = element_text(size = 25,color="black"),legend.text=element_text(size = 25),axis.text.y = element_text(size = 25,color="black"),panel.grid.major=element_blank(),panel.grid.minor=element_blank()) +
+      ylab('-log10 (P-Value)')+
+      xlab('log2 (Fold Change)')+
+      geom_vline(xintercept=c(-log2(2),log2(2)),lty=2,col="black",lwd=0.5) +
+      geom_hline(yintercept = -log10(0.05),lty=2,col="black",lwd=0.5)
+    
+    ggsave(paste0("./paper/fig2/",i,"_padjust0.01_logfc2_volcaono.pdf"),p2,width = 6.5,height = 4)
+    
+    dat <- get(paste0(i,"_data"))
+    stats_fc_i <- stats_fc_i[stats_fc_i$level!="No",]
+    train <- dat[rownames(dat) %in% rownames(stats_fc_i),]
+    cor <- cor(train,method = 'spearman')
+    ann_col <- all_ann_col
+    col <- all_col
+    ann_col <- ann_col[which(rownames(ann_col) %in% names(train)),]
+    col$Stage <- col$Stage[which(names(col$Stage) %in% c("Normal","NAA","CRC I/II","CRC III/IV"))]
+    col$Type <- col$Type[which(names(col$Type) %in% c("Control","Cancer"))]
+    train <- train %>% dplyr::select(sample(rownames(ann_col)[which(ann_col$Stage=="Normal")],length(rownames(ann_col)[which(ann_col$Stage=="Normal")])),rownames(ann_col)[which(ann_col$Stage=="NAA")],rownames(ann_col)[which(ann_col$Stage=="CRC I/II")],rownames(ann_col)[which(ann_col$Stage=="CRC III/IV")])
+    group <- ann_col
+    group$sample <- rownames(group)
+    pca <- prcomp(as.data.frame(t(train)),rank. = 10,center = T,scale=T)
+    summ1 <- summary(pca)
+    xlab1 <- paste0("PC1(",round(summ1$importance[2,1]*100,2),"%)")
+    ylab1 <- paste0("PC2(",round(summ1$importance[2,2]*100,2),"%)")
+    pca_x <- as.data.frame(pca$x)
+    pca_x$sample <- rownames(pca_x)
+    pca_x <- merge(pca_x,group,by="sample",all.x = T)
+    asw_cpm_combat = average_silhouette_width_batch(pca_x[, 2:3], pca_x$Type, metric = 'cosine')
+    print(asw_cpm_combat$overall_average_silhouette)
+    # pca_x$分期[which(pca_x$分期=="CRC III/IV")] <- ""
+    # pca_x$分期[which(pca_x$分期=="Health")] <- ""
+    # pca_x$分期[which(pca_x$分期=="High risk")] <- "NC"
+    p <- ggplot(pca_x, aes(x = PC1, y = PC2, fill = Type,starshape=Stage)) +
+      # geom_point(size=3) +
+      geom_star(size=3,aes(fill=Type,color=Type),show.legend = T,starstroke=0) + 
+      stat_ellipse(aes(x = PC1, y = PC2,group=Type,color=Type),size = 0.5,level = 0.95,inherit.aes = F,show.legend = F)+
+      # geom_text_repel(aes(label = gsub("CRC ","",分期)), size = 5, show.legend = F)+
+      theme_bw() + xlab(xlab1) + ylab(ylab1) + labs(title = "") +
+      theme(legend.position = "top",legend.title = element_blank()) +
+      theme(plot.title = element_text(size = 25),axis.title.x = element_text(size = 25),
+    axis.title.y = element_text(size = 25),axis.text.x = element_text(size = 25,color="black"),legend.text=element_text(size = 25),axis.text.y = element_text(size = 25,color="black"),panel.grid.major=element_blank(),panel.grid.minor=element_blank()) +
+      scale_color_manual(values = c("firebrick","steelblue"),name='') +
+      scale_fill_manual(values = c("firebrick","steelblue"),name='') +
+      scale_starshape_manual(values = c(15,29,26,14),name='')
+    ggsave(paste0("./paper/fig2/","/",i,"_train_preprocess_exp_pca.pdf"),p,width = 5,height = 5)
+    # p1 <- pheatmap::pheatmap(cor,show_rownames = F,show_colnames = F,cutree_rows = 2,cutree_cols = 2,cluster_cols = T,annotation_col = ann_col,annotation_colors = col,color = colorRampPalette(colors = c('steelblue','white' ,'firebrick'))(100),scale = "none",clustering_method = "ward.D2",legend_breaks=c(-1:1),breaks=seq(-1,1,0.02))
+    # ggsave(paste0(path,"/diff/train_preprocess_cor_heatmap.pdf"),p1,width = 6,height = 4)
+    p2 <- pheatmap::pheatmap(train,show_rownames = F,show_colnames = F,cluster_cols = F,annotation_col = ann_col,annotation_colors = col,color = colorRampPalette(colors = c('steelblue','white' ,'firebrick'))(100),scale = "row",clustering_method = "complete",treeheight_row=100,clustering_distance_rows = "euclidean",legend_breaks=c(-5:5),breaks=seq(-5,5,0.1))
+    ggsave(paste0("./paper/fig2/","/",i,"_train_preprocess_exp_heatmap.pdf"),p2,width = 6,height = 4)
+    p3 <- pheatmap::pheatmap(train,show_rownames = F,show_colnames = F,cluster_cols = T,annotation_col = ann_col,annotation_colors = col,color = colorRampPalette(colors = c('steelblue','white' ,'firebrick'))(100),scale = "row",clustering_method = "complete",treeheight_row=100,clustering_distance_rows = "euclidean",legend_breaks=c(-5:5),breaks=seq(-5,5,0.1))
+    ggsave(paste0("./paper/fig2/","/",i,"_train_preprocess_exp_heatmap_cluster.pdf"),p3,width = 6,height = 4)
+}
+###基于模型选定的热图
+for (type in c("cpm","cpf")) {
+    if(type=="cpm"){
+      path <- "G:/work/make_data/CRC/model_result/miRNA-2368/608_rf_miRNA_cpm_diff_beam_30_0.49_T_0_0/"
+      number <- 664
+    }else if(type=="cpf"){
+      path <- "G:/work/make_data/CRC/model_result/miRNA-2368/608_rf_miRNA_cpf_diff_beam_30_0.49_T_0_0/"
+      number <- 710
+    }
+    train <- as.data.frame(t(read.csv(paste0(path,type,"_",number,"/train_best_features_other.csv"),row.names = 1,check.names = F)))
+    test <- as.data.frame(t(read.csv(paste0(path,type,"_",number,"/test_best_features_other.csv"),row.names = 1,check.names = F)))
+    val <- as.data.frame(t(read.csv(paste0(path,type,"_",number,"/val_best_features_other.csv"),row.names = 1,check.names = F)))
+    aa <- as.data.frame(t(read.csv(paste0(path,type,"_",number,"/AA/val_best_feature.csv"),row.names = 1,check.names = F)))
+    train <- rbind(train,test,val,aa)
+    train <- as.data.frame(t(train))
+    train <- train[-nrow(train),]
+    ann_col <- all_ann_col
+    col <- all_col
+    ann_col <- ann_col[which(rownames(ann_col) %in% names(train)),]
+    col$Stage <- col$Stage[which(names(col$Stage) %in% c("Normal","NAA","AA","CRC I/II","CRC III/IV"))]
+    col$Type <- col$Type[which(names(col$Type) %in% c("Control","AA","Cancer"))]
+    train <- train %>% dplyr::select(sample(rownames(ann_col)[which(ann_col$Stage=="Normal")],length(rownames(ann_col)[which(ann_col$Stage=="Normal")])),rownames(ann_col)[which(ann_col$Stage=="NAA")],rownames(ann_col)[which(ann_col$Stage=="AA")],rownames(ann_col)[which(ann_col$Stage=="CRC I/II")],rownames(ann_col)[which(ann_col$Stage=="CRC III/IV")])
+    p3 <- pheatmap::pheatmap(train,show_rownames = F,show_colnames = F,cluster_cols = F,annotation_col = ann_col,annotation_colors = col,color = colorRampPalette(colors = c('steelblue','white','firebrick'))(50),scale = "column",clustering_method = "complete",treeheight_row=100,clustering_distance_rows = "euclidean",legend_breaks=c(-2:2),breaks=seq(-2,2,0.08))
+    #ggsave(paste0(path,type,"_",number,"/train_best_feature_heatmap_complete.pdf"),p3,width = 6,height = 3.5)
+    p4 <- pheatmap::pheatmap(train,show_rownames = T,show_colnames = F,cluster_cols = F,annotation_col = ann_col,annotation_colors = col,color = colorRampPalette(colors = c('steelblue','white','firebrick'))(50),scale = "column",clustering_method = "complete",treeheight_row=100,clustering_distance_rows = "euclidean",legend_breaks=c(-2:2),breaks=seq(-2,2,0.08))
+    ggsave(paste0(path,type,"_",number,"/train_best_feature_heatmap_complete_shownames.pdf"),p4,width = 10,height = 3.5)
+}
+```
+
+### iso有差异isogroup没差异
+
+```{r mechanism}
+###venn图
+iso <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/raw_ruvg_edger_result.rds"
+iso <- readRDS(url(URLencode(iso), "rb"))
+isogroup <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/isogroup_raw_ruvg_edger_result.rds"
+isogroup <- readRDS(url(URLencode(isogroup), "rb"))
+
+iso$level <- get_diff_level(iso)
+isogroup$level <- get_diff_level(isogroup)
+iso$family <- gsub("iso.*hsa","hsa",rownames(iso))
+isogroup$family <- rownames(isogroup)
+x <- list(miRNA=isogroup$family[isogroup$level!="No"],
+          isomiR=iso$family[iso$level!="No"]
+)
+p1 <- ggvenn(x,show_percentage=F,stroke_size=0,set_name_size = 8,text_size = 10,fill_color = c("firebrick","royalblue"),fill_alpha = 0.7,auto_scale = F) +
+  scale_y_continuous(limits = c(-1, 1.5))
+ggsave("./paper/fig2/family_iso_cpm_venn_precent.pdf",p1,width = 5,height = 5)
+
+###mechanism
+for (type in c("family","iso","intersect")) {
+if(type=="family"){
+  feature <- setdiff(isogroup$family[isogroup$level!="No"],iso$family[iso$level!="No"])
+}else if(type=="iso"){
+  feature <- setdiff(iso$family[iso$level!="No"],isogroup$family[isogroup$level!="No"])
+}else if(type=="intersect"){
+  feature <- intersect(iso$family[iso$level!="No"],isogroup$family[isogroup$level!="No"])
+}
+  for (i in feature) {
+      stats_fc_i <- iso[which(iso$family %in% i),]
+      stats_fc_f <- isogroup[which(isogroup$family %in% i),]
+      stats_fc_f$level <- rownames(stats_fc_f)
+      result <- rbind(stats_fc_i,stats_fc_f)
+      result$feature <- rownames(result)
+      result$level = factor(ifelse(result$feature==i,i,ifelse(result$PValue < 0.05 & abs(result$logFC) > log2(2), ifelse(result$logFC> log2(2) ,'Up','Down'),'No')),levels=c(i,'Up','Down','No'))
+      result$level[which(result$feature==i)] <- as.factor(i)
+      if(all(c("Up","Down") %in% unique(result$level))){
+        color <- c("darkgreen","#DC143C","#00008B","#808080")
+        result$level <- factor(result$level,levels = c(i,'Up','Down','No'))
+      }else if(all(c("Up") %in% unique(result$level))){
+        color <- c("darkgreen","#DC143C","#808080")
+        result$level <- factor(result$level,levels = c(i,'Up','No'))
+      }else if(all(c("Down") %in% unique(result$level))){
+        color <- c("darkgreen","#00008B","#808080")
+        result$level <- factor(result$level,levels = c(i,'Down','No'))
+      }else{
+        color <- c("darkgreen","#808080")
+        result$level <- factor(result$level,levels = c(i,'No'))
+      }
+  
+      p <- ggplot(result,aes(x=logFC,y=-log10(PValue),color=level))+
+        geom_point(size=3)+
+        scale_color_manual(values=color,name = "",labels=paste0(names(table(result$level)),"(",c(table(result$level)),")"))+
+        scale_size_continuous(name = "") +
+        geom_text_repel(data = result[which(result$feature==i),],aes(label = feature),size = 5,segment.size = 1,color = "black", nudge_x = 2,show.legend = FALSE,arrow = arrow(length=unit(0.02, "npc")))+
+        theme_bw(25)+
+        theme(plot.title = element_text(size = 25),axis.title.x = element_text(size = 25),
+              axis.title.y = element_text(size = 25),axis.text.x = element_text(size = 25,color="black"),legend.text=element_text(size = 25),axis.text.y = element_text(size = 25,color="black"),panel.grid.major=element_blank(),panel.grid.minor=element_blank()) +
+        ylab('-log10 (p-value)')+
+        xlab('log2 (Fold Change)')+
+        geom_vline(xintercept=c(-log2(2),log2(2)),lty=2,col="black",lwd=0.5) +
+        geom_hline(yintercept = -log10(0.05),lty=2,col="black",lwd=0.5)
+      ggsave(paste0("./paper/fig2/mechanism/",type,"/",i,"_volcaono_plot.pdf"),p,width = 10,height = 6)
+  }
+}
+path <- "./paper/fig2/mechanism/iso/"
+files <- list.files(path,"*",recursive = T,full.names = T)
+qpdf::pdf_combine(files,paste0("./paper/fig2/mechanism/iso/","all_boxplot.pdf"))
+
+path <- "./paper/fig2/mechanism/intersect/"
+files <- list.files(path,"*",recursive = T,full.names = T)
+qpdf::pdf_combine(files,paste0("./paper/fig2/mechanism/intersect/","all_boxplot.pdf"))
+###绘制family的0值占比boxplot
+feature <- setdiff(rownames(data_family_diff),data_cpm_diff$family)
+stats_fc_i <- read.csv(paste0(file_path_cpm_iso_all,"/stats_diff_result.csv"),row.names = 1)
+stats_fc_f <- read.csv(paste0(file_path_family_all,"stats_diff_result.csv"),row.names = 1)
+stats_fc_i$family <- gsub("iso.*hsa","hsa",stats_fc_i$feature)
+stats_fc_i <- stats_fc_i[which(stats_fc_i$family %in% feature),]
+stats_fc_i <- stats_fc_i[-which(is.na(stats_fc_i$pvalue)),]
+stats_fc_i$logFC <- log2(stats_fc_i$fc)
+stats_fc_i <- stats_fc_i[,-5]
+stats_fc_i$level <- "IsomiRs"
+stats_fc_i <- stats_fc_i[which((stats_fc_i$fc>=2|stats_fc_i$fc<=0.5)&stats_fc_i$pvalue<=0.01),]
+stats_fc_f <- stats_fc_f[which(stats_fc_f$feature %in% feature),]
+stats_fc_f$logFC <- log2(stats_fc_f$fc)
+stats_fc_f$level <- "Family"
+result <- rbind(stats_fc_f,stats_fc_i)
+p3 <- ggplot(result,aes(x=level,y=rate,color=level)) +
+  geom_boxplot(outlier.color = "white") + theme_bw() +
+  geom_jitter(width = 0.1,size=1) +
+  geom_hline(yintercept = 0.2,lty=2,col="black",lwd=0.5)+
+  theme(legend.position = 'none',plot.title = element_text(size = 25),axis.title.x = element_text(size = 25),
+        axis.title.y = element_text(size = 25),axis.text.x = element_text(size = 25,color="black"),legend.text=element_text(size = 25),axis.text.y = element_text(size = 25,color="black"),panel.grid.major=element_blank(),panel.grid.minor=element_blank())+
+  xlab("")+ylab("zero-ratio")+
+  scale_color_manual(values = c("orange","royalblue"))
+ggsave(paste0("G:/work/make_data/CPF_result/mechanism/family_iso_boxplot.pdf"),p3,width = 6,height = 5)
+```
+
+
+### 差异marker的kegg等注释
+
+```{r target, eval=FALSE, include=FALSE}
+library(multiMiR)
+# de_cpm <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/de_genes_cpm_combat.rds"
+# de_cpm <- readRDS(url(URLencode(de_cpm), "rb"))
+# de_cpf <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/de_genes_irp_combat.rds"
+# de_cpf <- readRDS(url(URLencode(de_cpf), "rb"))
+# miRNA <- unique(gsub(".*_hsa","hsa",gsub("_irp|cpm","",c(rownames(de_cpf),rownames(de_cpm)))))
+iso <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/raw_ruvg_edger_result.rds"
+iso <- readRDS(url(URLencode(iso), "rb"))
+iso$level <- get_diff_level(iso)
+iso <- iso[iso$level!="No",]
+iso$family <- gsub("iso.*hsa","hsa",rownames(iso))
+miRNA <- unique(iso$family)
+example5_2 <- get_multimir(org = "hsa",mirna = miRNA,table = "validated",summary = TRUE)
+target <- example5_2@data
+write.csv(target,paste0("./paper/fig2/","de_raw_ruvg_target_result.csv"),quote = F,row.names = F)
+db <- unique(example5_2@data$database)
+row1 <- example5_2@data %>% filter(database == db[1])
+row2 <- example5_2@data %>% filter(database == db[2])
+row3 <- example5_2@data %>% filter(database == db[3])
+venn_list <- list(target1=unique(row1$target_symbol),
+target2=unique(row2$target_symbol),
+target3=unique(row3$target_symbol))
+for (i in 1:length(venn_list)) {
+if(i == 1){interGenes <- venn_list[[1]]}
+else{interGenes <- intersect(interGenes, venn_list[[i]])}
+}
+inster_target <- target[which(target$target_symbol %in% interGenes),]
+write.csv(inster_target,paste0("./paper/fig2/","de_raw_ruvg_instersect_target_result.csv"),quote = F,row.names = F)
+ggvenn::ggvenn(list(mirecords=unique(row1$target_symbol),mirtarbase=unique(row2$target_symbol),tarbase=unique(row3$target_symbol)),show_percentage=F,stroke_size=0,fill_alpha = 0.7,auto_scale = F,fill_color = c("orange","royalblue","firebrick"))
+ggsave(paste0("./paper/fig2/","de_raw_ruvg_target_venn_plot.pdf"),width = 6,height = 5.5)
+```
+
+```{r kegg, eval=FALSE, include=FALSE}
+library(DOSE)
+library(org.Hs.eg.db)
+library(topGO)
+library(msigdbr)
+library(clusterProfiler)
+library(pathview)
+file_path <- "./paper/fig2/target/"
+path <- "./paper/fig2/target/"
+target <- read.csv(paste0(file_path,"de_raw_ruvg_instersect_target_result.csv"))
+test = bitr(unique(target$target_symbol),fromType="SYMBOL",toType="ENTREZID",OrgDb="org.Hs.eg.db")
+kegg<- enrichKEGG(gene = test$ENTREZID,organism = 'hsa',pvalueCutoff = 1,use_internal_data = T)
+kegg <- setReadable(kegg, OrgDb = org.Hs.eg.db, keyType="ENTREZID")
+# kegg@result <- kegg@result[grep("advanced|adenoma|colorectal|cancer|intestinal|bowel|CRC|rectal|rectum|carcinoma|intestine",kegg@result$Description,ignore.case=T),]
+kegg@result <- kegg@result[which(kegg@result$p.adjust<=0.05),]
+# ke <- kegg@result
+# ke <- separate_rows(ke,geneID,sep="/",convert=TRUE)
+# id <- test
+# names(id)[2] <- "geneID"
+# ke <- merge(ke,id)
+# k <- aggregate(ke,by=list(ke$geneID,ke$SYMBOL),FUN=function(x){paste(x,colla pse = "/")})
+write.table(kegg@result,paste0(path,"kegg/de_raw_ruvg_instersect_target_result.xls"),quote = F,row.names = F,sep = "\t")
+p<-dotplot(kegg,title="Enrichment KEGG_dot",showCategory = 21)
+ggsave(paste0(path,"kegg/de_raw_ruvg_instersect_target_kegg_plot.pdf"),p,width = 8,height = 7)
+
+go<- enrichGO(gene = test$ENTREZID,OrgDb = org.Hs.eg.db,ont = "ALL",pvalueCutoff = 1,readable = TRUE)
+# go@result <-go@result[grep("advanced|adenoma|colorectal|cancer|intestinal|bowel|CRC|rectal|rectum|carcinoma|intestine",go@result$Description,ignore.case=T),]
+write.table(go@result,paste0(path,"go/de_raw_ruvg_instersect_target_result.xls"),quote = F,row.names = F,sep = "\t")
+p<-dotplot(go,title="Enrichment GO_dot",showCategory = 21)
+ggsave(paste0(path,"go/de_raw_ruvg_instersect_target_go_plot.pdf"),p,width = 8,height = 10)
+
+m_t2g <- msigdbr(species = "Homo sapiens", category = "C6") %>% 
+  dplyr::select(gs_name, entrez_gene)
+
+result <- enricher(test$ENTREZID,TERM2GENE = m_t2g,minGSSize = 1,pvalueCutoff = 1) 
+write.table(result@result,paste0(path,"C6/de_raw_ruvg_intersect_target_result.xls"),quote = F,row.names = F,sep = "\t")
+p<-dotplot(result,title="Enrichment C6_dot")
+ggsave(paste0(path,"C6/de_raw_ruvg_instersect_target_C6_plot.pdf"),p,width = 8,height = 6)
+```
+
+## fig 3
+
+
+### ROC曲线
+
+```{r cpf_cpm}
+library(caret)
+library(patchwork)
+library(gridExtra)
+library(gtable)
+library(grid)
+library(ggpubr)
+get_cut_off <- function(ROC){
+  thresholds = ROC[["sensitivities"]]+ROC[["specificities"]]-1
+  thresholds <- ROC[["thresholds"]][which(thresholds==max(ROC[["sensitivities"]]+ROC[["specificities"]]-1))]
+  return(thresholds)
+}
+ROC_plot <- function(ROC){
+  thresholds = ROC[["sensitivities"]]+ROC[["specificities"]]-1
+  sen <- ROC[["sensitivities"]][which(thresholds==max(ROC[["sensitivities"]]+ROC[["specificities"]]-1))]
+  spe <- ROC[["specificities"]][which(thresholds==max(ROC[["sensitivities"]]+ROC[["specificities"]]-1))]
+  result <- c(sen,spe)
+  return(result)
+}
+cut_off_diy <-function(data,cut_off){
+  case <- data[which(data$label==1),]
+  sen <- length(which(case$pre_proba>=cut_off))/length(case$pre_proba)
+  control <- data[which(data$label==0),]
+  spe <- length(which(control$pre_proba<cut_off))/length(control$pre_proba)
+  result <- c(sen,spe)
+  return(result)
+}
+data_ci <- function(ROC){
+  ciobj <- ci.se(ROC,specificities=seq(0, 1, 0.01))
+  data <- data.frame(x=as.numeric(row.names(ciobj)),
+             lower=ciobj[,1],
+             upper=ciobj[,3])
+  return(data)
+}
+data_pre_label <- function(data,cut_off){
+  data$pre_label <- data$label
+  data$pre_label[which(data$pre_proba<cut_off)] <- "0"
+  data$pre_label[which(data$pre_proba>=cut_off)] <- "1"
+  return(data)
+}
+stage_boxplot <- function(data,ann_col,model_name,outpath){
+    cut_off <- 0.5
+    all_data <- ann_col
+    all_data$Sample <- rownames(all_data)
+    all_data$Stage <- gsub("CRC I/II","CRC(I/II)",all_data$Stage)
+    all_data$Stage <- gsub("CRC III/IV","CRC(III/IV)",all_data$Stage)
+    all_data$Stage[which(all_data$Type %in% c("SSA"))] <- "AA"
+
+    result <- base::merge(data,all_data,all.x = T,by="Sample")
+    result <- result[!result$Stage %in% c("IBD","Tis"),]
+    result$Stage <- factor(result$Stage,levels = c("Normal","NAA","AA","CRC(I/II)","CRC(III/IV)"))
+    # a <-  combinations(5,2,c("Normal","NAA+poplyp","AA","CRC(I/II)","CRC(III/IV)"))
+    # my_comparisons <- list()
+    # for (i in c(1:dim(a)[1])) {
+    #   my_comparisons[[i]] <- c(a[i,])
+    # }
+    # r <- cor.test(as.numeric(result$Stage),result$pre_proba,method = 'pearson')
+    median_v <- data.frame()
+    for (i in c("Normal","NAA","AA","CRC(I/II)","CRC(III/IV)")) {
+      re <- data.frame(Stage=i,median=median(result$pre_proba[which(result$Stage==i)]))
+      median_v <- rbind(median_v,re)
+    }
+    median_v$Stage <- factor(median_v$Stage,levels = c("Normal","NAA","AA","CRC(I/II)","CRC(III/IV)"))
+    r <- cor.test(as.numeric(median_v$Stage),median_v$median,method = 'pearson')
+    # r <- cor.test(as.numeric(result$Stage[which(result$Stage %in% c("Normal","NAA","AA"))]),result$pre_proba[which(result$Stage %in% c("Normal","NAA","AA"))],method = 'pearson')
+    my_comparisons <- list(c("Normal","NAA"),c("NAA","AA"),c("AA","CRC(I/II)"),c("CRC(I/II)","CRC(III/IV)"))
+    p <- ggplot(result,aes(x=Stage,y=pre_proba)) +
+      geom_boxplot(outlier.color = "white") + theme_bw() +
+      geom_jitter(width = 0.1,size=1,aes(color=Stage)) +
+      stat_compare_means(comparisons = my_comparisons,method = "t.test",method.args=list(alternative="two.sided"),label="p.signif",vjust=1.6,hide.ns=F,size=6)+
+      stat_compare_means(comparisons = my_comparisons,method = "t.test",method.args=list(alternative="two.sided"),label="p.format",vjust=0,hide.ns=T,size=3)+
+      theme(legend.position = 'none',plot.title = element_text(size = 25),axis.title.x = element_text(size = 25),
+                axis.title.y = element_text(size = 25),axis.text.x = element_text(size = 25,color="black"),legend.text=element_text(size = 25),axis.text.y = element_text(size = 25,color="black"),panel.grid.major=element_blank(),panel.grid.minor=element_blank())+
+      xlab("")+ylab("Score")+
+      annotate("text",x=1.5,y=1,vjust=-6,label=paste0("R = ",round(r[["estimate"]][["cor"]],3),",P << 0.001"))+
+      geom_hline(yintercept = cut_off, color = 'red', size = 0.5,linetype="dashed") +
+      scale_color_manual(values = colorRampPalette(colors = brewer.pal(9,"Reds")[4:9], interpolate ="spline")(5))
+      #scale_color_manual(values = colorRampPalette(colors = c('LimeGreen','Brown'))(5))
+      ggsave(paste0(outpath,model_name,"_predict_median_value_boxplot.pdf"),p,width = 5,height = 4)
+}
+get_ci_se_sp <- function(data,type,cut_off){
+  if(type=="sp"){
+    sp <- length(which(data$pre_proba<cut_off))/length(data$pre_proba)
+    s <- sqrt((sp*(1-sp))/length(data$pre_proba))
+    result <- data.frame(value=sp,value_low=sp-1.96*s,value_up=sp+1.96*s)
+  }else if(type=="se"){
+    se <- length(which(data$pre_proba>=cut_off))/length(data$pre_proba)
+    s <- sqrt((se*(1-se))/length(data$pre_proba))
+    result <- data.frame(value=se,value_low=se-1.96*s,value_up=se+1.96*s)
+  }
+  return(result)
+}
+stage_point <- function(data,ann_col,model_name,outpath){
+  cut_off <- 0.5
+  all_data <- ann_col
+  all_data$Sample <- rownames(all_data)
+  all_data$Stage <- gsub("CRC I/II","CRC(I/II)",all_data$Stage)
+  all_data$Stage <- gsub("CRC III/IV","CRC(III/IV)",all_data$Stage)
+  # all_data$Stage[which(all_data$Type %in% c("Tis","SSA"))] <- all_data$Type[which(all_data$Type %in% c("Tis","SSA"))]
+  # all_data$Stage[which(all_data$Type == "IBD")] <- all_data$Type[which(all_data$Type =="IBD")]
+  all_data$Stage[which(all_data$Stage=="SSA")] <- "AA"
+  data <- base::merge(data,all_data,all.x = T)
+  data$Stage <- factor(data$Stage,levels = c("AA","Tis","CRC(I/II)","CRC(III/IV)","Normal","NAA","IBD"))
+  result <- data.frame()
+  for (i in c("AA","Tis","CRC(I/II)","CRC(III/IV)")) {
+    dt <- data[which(data$Stage %in% i),]
+    re <- get_ci_se_sp(dt,"se",cut_off)
+    re[["stage"]] <- i
+    re[["Type"]] <- 1
+    re[["group"]] <- "Sensitivity"
+    result <- rbind(result,re)
+  }
+  result$stage <- factor(result$stage,levels = c("AA","Tis","CRC(I/II)","CRC(III/IV)"))
+  result$value_up[which(result$value_up>1)] <- 1
+  result$value_low[which(result$value_low<0)] <- 0
+  # result$value[which(result$value< 0.5)] <- 0.5
+  num <- table(data$Stage)
+  p1 <- ggplot(result,aes(x=stage,y=value)) +
+      geom_point(size = 5, color = "firebrick") +
+      geom_errorbar(aes(ymin = value_low, ymax = value_up),color="firebrick",width = 0.1,size=1) +
+      theme_bw()+ geom_text(aes(label=round(value,3)),color="black",size = 8,hjust=-0.2)+
+      theme(legend.position = c(0.88,0.1),plot.title = element_text(size = 25),axis.title.x = element_text(size = 25),
+      axis.title.y = element_text(size = 25),axis.text.x = element_text(size = 25,color="black"),legend.text=element_text(size = 25),axis.text.y = element_text(size = 25,color="black"),panel.grid.major=element_blank(),panel.grid.minor=element_blank()) +
+      labs(title = "") +xlab("")+ylab("Sensitivity")+
+      scale_x_discrete(labels = paste0(names(num),"\n(n=",num,")")[1:4])+
+      ylim(c(0,1))
+  ggsave(paste0(outpath,model_name,"_stage_point_Sensitivity.pdf"),p1,width = 5,height = 4)
+  result <- data.frame()
+  for (i in c("Normal","NAA","IBD")) {
+    dt <- data[which(data$Stage %in% i),]
+    re <- get_ci_se_sp(dt,"sp",cut_off)
+    re[["stage"]] <- i
+    re[["Type"]] <- 0
+    re[["group"]] <- "Specificity"
+    result <- rbind(result,re)
+  }
+  result$stage <- factor(result$stage,levels = c("Normal","NAA","IBD"))
+  result$value_up[which(result$value_up>1)] <- 1
+  result$value_low[which(result$value_low<0)] <- 0
+  # result$value[which(result$value< 0.5)] <- 0.5
+  p2 <- ggplot(result,aes(x=stage,y=value)) +
+      geom_point(size = 5, color = "steelblue") +
+      geom_errorbar(aes(ymin = value_low, ymax = value_up),color="steelblue",width = 0.1,size=1) +
+      theme_bw()+ geom_text(aes(label=round(value,3)),color="black",size = 8,hjust=-0.2)+
+      theme(legend.position = c(0.88,0.1),plot.title = element_text(size = 25),axis.title.x = element_text(size = 25),
+      axis.title.y = element_text(size = 25),axis.text.x = element_text(size = 25,color="black"),legend.text=element_text(size = 25),axis.text.y = element_text(size = 25,color="black"),panel.grid.major=element_blank(),panel.grid.minor=element_blank()) +
+      labs(title = "") +xlab("")+ylab("Specificity")+
+      scale_x_discrete(labels = paste0(names(num),"\n(n=",num,")")[5:7])+
+      ylim(c(0,1))
+  ggsave(paste0(outpath,model_name,"_stage_point_Specificity.pdf"),p2,width = 5,height = 4)
+}
+model_result <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/train_eval_result_v2.rds"
+model_result <- readRDS(url(URLencode(model_result), "rb"))
+TCGA_model <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/modeling_result_tcga.rds"
+TCGA_model <- readRDS(url(URLencode(TCGA_model), "rb"))
+model_result$TCGA <- TCGA_model
+group <- ann_col
+group$Sample <- rownames(group)
+##多模型比较曲线图
+########################################################################################
+predictions_list <- lapply(model_result, function(model_result) model_result$test_pred)
+
+# 将 list 转换为 data frame，并设置列名为模型名
+results_df <- do.call(cbind, predictions_list)
+colnames(results_df) <- names(model_result)
+
+# 设置行名为样本名（假设所有模型的样本名相同）
+rownames(results_df) <- names(model_result[[1]]$test_pred)
+results_df <- as.data.frame(results_df)
+results_df$Sample <- rownames(results_df)
+results_df <- merge(results_df,group,all.x = T)
+results_df$label <- ifelse(results_df$Type=="Cancer",1,0)
+result <- data.frame(Threshold=c(),yuden=c(),Sensitivities=c(),Specificities=c(),label=c())
+for (i in names(model_result)) {
+  ROC <- roc(results_df[["label"]],results_df[[i]],smooth = F)
+  ROC$thresholds[is.infinite(ROC$thresholds) & ROC$thresholds < 0] <- 0
+  ROC$thresholds[is.infinite(ROC$thresholds) & ROC$thresholds > 0] <- 1
+  re <- data.frame(Threshold=ROC$thresholds,yuden=ROC$sensitivities+ROC$specificities-1,Sensitivities=ROC$sensitivities,Specificities=ROC$specificities,label=i)
+  result <- rbind(result,re)
+}
+p <- ggplot(result[result$label=="raw_ruvg_edger",], aes(x = Threshold, group = label)) +
+  geom_line(aes(y = Sensitivities), color = "firebrick") +
+  geom_line(aes(y = Specificities), color = "steelblue") +
+  scale_y_continuous(
+    name = "Sensitivities",
+    sec.axis = sec_axis(~., name = "Specificities")
+  ) +
+  theme_bw() +
+  theme(
+    plot.title = element_text(size = 25),
+    axis.title.x = element_text(size = 25),
+    axis.title.y = element_text(size = 25),
+    axis.text.x = element_text(size = 25, color = "black"),
+    legend.text = element_text(size = 25),
+    axis.text.y = element_text(size = 25, color = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+ 
+# 创建自定义图例
+legend <- ggplot() + 
+  geom_line(aes(x = c(0.15, 0.25), y = c(0.03, 0.03)), color = "firebrick", size = 1) +
+  geom_text(aes(x = 0.27, y = 0.03, label = "Sensitivities"), hjust = 0, size = 8) +
+  geom_line(aes(x = c(0.5, 0.6), y = c(0.03, 0.03)), color = "steelblue", size = 1) +
+  geom_text(aes(x = 0.62, y = 0.03, label = "Specificities"), hjust = 0, size = 8) +
+  theme_void() +
+  theme(plot.margin = margin(t = 0, r = 20, b = 0, l = 0)) +
+  xlim(c(0,1)) + ylim(c(0,0.1))
+
+p <- plot_grid(
+  legend, p, 
+  ncol = 1, 
+  rel_heights = c(0.2, 1))
+ggsave("G:/work/make_data/CRC/model_result/paper-xu/paper_plot/fig3/raw_ruvg_edger_model_test_cutoff_sen_sep_line_plot.pdf",p,width = 9,height = 7.5)
+##############################################################################################################################
+
+for (i in names(model_result)) {
+  
+  data <- data.frame(Sample = names(model_result[[i]][["test_pred"]]),pre_proba=model_result[[i]][["test_pred"]])
+  data <- merge(data,group,all.x = T)
+  data$label <- ifelse(data$Type=="Cancer",1,0)
+  ROC_line_1 <- function(train,title){
+    train_r <- roc(train$label,train$pre_proba,smooth = F)
+    data_train <- data_ci(train_r)
+    train_a <- ci(train_r)
+    ggroc(list(Train=train_r),legacy.axes = TRUE,size = 1,color = "firebrick") +
+      geom_segment(aes(x = 0, xend = 1, y = 0, yend = 1), size=1, color="grey",linetype="dashed") +
+      theme_bw() + 
+      theme(plot.title = element_text(size = 25),axis.title.x = element_text(size = 25),
+            axis.title.y = element_text(size = 25),axis.text.x = element_text(size = 25,color="black"),legend.text=element_text(size = 25),axis.text.y = element_text(size = 25,color="black"),panel.grid.major=element_blank(),panel.grid.minor=element_blank()) +
+      xlab("1 - Specificity") + ylab("Sensitivity") + ggtitle(title) +
+      # scale_color_manual(values = c("#FFB90F","#0072B5FF","firebrick"),name=NULL,label=c("IRP","IRE","Combine")) +
+      # geom_point(aes(x=1-cut_off_diy(train,cut_off)[2],y=cut_off_diy(train,cut_off)[1]),size=2,color=pal_nejm("default")(4)[1],alpha=0.9) +
+      # geom_point(aes(x=1-cut_off_diy(test,cut_off)[2,y=cut_off_diy(test,cut_off)[1]),size=2,color=pal_nejm("default")(4)[2],alpha=0.9) +
+      # geom_point(aes(x=1-cut_off_diy(val,cut_off)[2],y=cut_off_diy(val,cut_off)[1]),size=2,color=pal_nejm("default")(4)[3],alpha=0.9) +
+      # annotate("text", x = 0.55, y = 0.35, hjust = 0,color = "#FFB90F",size=6,label = paste(paste(paste0("AUC : ",round(as.numeric(train_r$auc),3)),paste0("95% ","CI :",round(train_a[1],3),"-",round(train_a[3],3)),sep="\n"),sep = "\n"))+
+      # annotate("text", x = 0.55, y = 0.2, hjust = 0,color = "#0072B5FF",size=6,label = paste(paste(paste0("AUC : ",round(as.numeric(test_r$auc),3)),paste0("95% ","CI :",round(test_a[1],3),"-",round(test_a[3],3)),sep="\n"),sep = "\n"))+
+      annotate("text", x = 0.55, y = 0.05, hjust = 0,color = "firebrick",size=6,label = paste(paste(paste0("AUC : ",round(as.numeric(train_r$auc),3)),paste0("95% ","CI :",round(train_a[1],3),"-",round(train_a[3],3)),sep="\n"),sep = "\n"))+
+      # geom_ribbon(data = data_train,aes(ymin=lower,ymax=upper,x=1-x),fill = "#FFB90F",alpha=0.2,inherit.aes = F) +
+      # geom_ribbon(data = data_test,aes(ymin=lower,ymax=upper,x=1-x),fill = "#0072B5FF",alpha=0.2,inherit.aes = F) +
+      geom_ribbon(data = data_train,aes(ymin=lower,ymax=upper,x=1-x),fill = "firebrick",alpha=0.2,inherit.aes = F) 
+  }
+  p1 <- ROC_line_1(data,"")
+  ggsave(paste0("./paper/fig3/",i,"_test_roc_plot.pdf"),p1,width = 7,height = 6)
+  cpf <- data
+  #cpf$pre_proba <- 1-cpf$pre_proba
+  ROC <-  roc(cpf$label,cpf$pre_proba)
+  # get_cut_off(ROC)
+  cut_off <- model_result[[i]][["threshold"]]
+  cpf <- data_pre_label(cpf,cut_off)
+  cpf$pre_label <- factor(cpf$pre_label,levels = c("1","0"))
+  cpf$label <- factor(cpf$label,levels = c("1","0"))
+  result <- table(cpf$pre_label,cpf$label)
+  re <- confusionMatrix(result)
+  sample <- c(length(which(cpf$label==1)),length(which(cpf$label==0)))
+  df <- data.frame(sample = sample,Type=c("Cancer","Control"))
+  pie <- ggplot(df, aes(x="", y=sample, fill=Type))+
+    geom_bar(width = 1, stat = "identity",show.legend = F,color="white",size=1) +
+    coord_polar("y", start=0) +
+    theme_void() +
+    geom_text(aes(y = sample/2.58 + c(0, cumsum(sample)[-length(sample)]),label=paste(Type,paste0("n = ",sample),sep = "\n")), size = 9,color="white") +
+    scale_fill_manual(values = c("steelblue","firebrick"))
+  df <- data.frame(re$table)
+  names(df) <- c("Predict","Real","counts")
+  df$Real <- as.character(df$Real)
+  df$Predict <- as.character(df$Predict)
+  df$counts <- as.character(df$counts)
+  df$Real[which(df$Real==1)] <- "Cancer" 
+  df$Predict[which(df$Predict==1)] <- "Cancer" 
+  df$Real[which(df$Real==0)] <- "Control" 
+  df$Predict[which(df$Predict==0)] <- "Control"
+  df$Real <- factor(df$Real,levels = c("Cancer","Control"))
+  df$Predict <- factor(df$Predict,levels = c("Control","Cancer"))
+  df$fill[which(df$Real=="Control"&df$Predict=="Control")] <-  "steelblue"
+  df$fill[which(df$Real=="Cancer"&df$Predict=="Cancer")] <-  "firebrick"
+  df$fill[which(df$Real!=df$Predict)] <-  "white"
+  df$color[which(df$Real==df$Predict)] <- "white"
+  df$color[which(df$Real!=df$Predict)] <- "black"
+  confusion_Matrix <- ggplot(df,aes(x = Real, y = Predict,fill=fill)) +
+    geom_tile(colour = "black",size=1,show.legend = F) +
+    geom_text(aes(label = counts,color=color),size=9, vjust = 1,show.legend = F) +
+    scale_color_manual(values = c("black","white")) +
+    scale_fill_manual(values = c("firebrick","steelblue","white")) +
+    scale_x_discrete(position = "top") +
+    theme_bw() +
+    theme(plot.title = element_text(size = 25),axis.title.x = element_text(size = 25),
+          axis.title.y = element_text(size = 25,angle = 90),axis.text.x = element_text(size = 25,color="black"),legend.text=element_text(size = 25),axis.text.y = element_text(size = 25,color="black",angle = 90,hjust = 0.5),panel.grid.major=element_blank(),panel.grid.minor=element_blank(),axis.ticks=element_blank(),panel.border = element_blank()) 
+  dt <- data.frame(Index = names(re$byClass),Score=re$byClass)
+  dt <- rbind(dt,data.frame(Index="Accuracy",Score=re[["overall"]][["Accuracy"]]),data.frame(Index="Threshold",Score=cut_off))
+  tbl <- tableGrob(dt,rows = NULL,theme = ttheme_minimal(base_size =25,))
+  tbl$widths <- unit(c(0.5,0.3), "npc")
+  tbl$heights <- unit(rep(0.94/nrow(tbl), nrow(tbl)), "npc")
+  for (j in c(1:nrow(tbl))) {
+    tbl <- gtable_add_grob(tbl,grobs = rectGrob(gp = gpar(fill = "NA", lwd = 2)),t = 1, b = j, l = 1, r = ncol(tbl))
+  }
+  tbl <- gtable_add_grob(tbl,grobs = rectGrob(gp = gpar(fill = "NA", lwd = 2)),t = 1, l = 1, r = ncol(tbl))
+  tbl <- gtable_add_grob(tbl,grobs = rectGrob(gp = gpar(fill = "NA", lwd = 2)),t = 1, b = nrow(tbl),l = 2, r = ncol(tbl))
+  p2 <- (pie/confusion_Matrix)|tbl 
+  ggsave(paste0("./paper/fig3/",i,"_pie_plot.pdf"),p2,width = 16,height = 10)
+  data <- cpf
+  data$level <- ifelse(data$label==data$pre_label,"True","False")
+  p_value <- chisq.test(table(data$level,data$Gender))[["p.value"]]
+  re <- as.data.frame(table(data$level,data$Gender)) 
+  p3 <- ggplot(re,aes(x=Var1,y=Freq,fill=Var2)) +
+    geom_bar(stat = "identity",position = "fill",width = 0.6) +
+    geom_text(aes(label = Freq), size = 5, hjust = 0.5, vjust = 5,position = "fill") +
+    theme_bw()+ xlab("") + ylab("")+
+    theme(legend.position = "top",plot.title = element_text(size = 25),axis.title.x = element_text(size = 25),
+        axis.title.y = element_text(size = 25),axis.text.x = element_text(size = 25,color="black",angle = 45,hjust = 1),legend.text=element_text(size = 25),axis.text.y = element_text(size = 25,color="black"),panel.grid.major=element_blank(),panel.grid.minor=element_blank()) +
+    scale_fill_manual(values = c("#87CEFA","#FFDEAD"),name="") +
+    geom_signif(xmin = 1,xmax = 2,y_position=1.05,tip_length  = 0.0001,annotations = paste0("P = ",round(p_value,3)),size = 0.3,textsize = 5) +
+    scale_x_discrete(breaks = c("False","True"),label=c("Incorrect","Correct")) +
+    scale_y_continuous(breaks = seq(0,1,0.2),label=seq(0,1,0.2))
+  ggsave(paste0("./paper/fig3/",i,"_sample_gender_True_False.pdf"),p3,width = 3.6,height = 6.5)
+  pv <- t.test(data$Age[which(data$level=="False")],data$Age[which(data$level=="True")])[['p.value']]
+  p4 <- ggplot(data,aes(x=level,y=Age)) +
+    geom_boxplot(fill="yellow",notch = T,notchwidth = 0.8,outlier.color = "#A9A9A9") +
+    geom_quasirandom(width = 0.4,size=1,color="#A9A9A9") +
+    geom_signif(xmin = 1,xmax = 2,y_position=99,tip_length  = 0.02,annotations = paste0("P = ",round(pv,3)),size = 0.3,textsize = 5) +
+    theme_bw()+ xlab("") + ylab("") +
+    theme(legend.position = "top",plot.title = element_text(size = 25),axis.title.x = element_text(size = 25),
+        axis.title.y = element_text(size = 25),axis.text.x = element_text(size = 25,color="black",angle = 45,hjust = 1),legend.text=element_text(size = 25),axis.text.y = element_text(size = 25,color="black"),panel.grid.major=element_blank(),panel.grid.minor=element_blank()) +
+    scale_x_discrete(breaks = c("False","True"),label=c("Incorrect","Correct"))
+  ggsave(paste0("./paper/fig3/",i,"_sample_age_True_False.pdf"),p4,width = 3.6,height = 6.5)
+  data <- data.frame(Sample = names(model_result[[i]][["all_test_pred"]]),pre_proba=model_result[[i]][["all_test_pred"]])
+  stage_boxplot(data,ann_col,i,"./paper/fig3/")
+  stage_point(data,ann_col,i,"./paper/fig3/")
+}
+iso <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/raw_ruvg_edger_result.rds"
+iso <- readRDS(url(URLencode(iso), "rb"))
+##i=TCGA
+iso$seq <- rownames(iso) %>% lapply(function(x) strsplit(x,"_")[[1]][2]) %>% unlist() 
+model_iso <- iso[iso$seq %in% gsub("\\.","-",model_result[["TCGA"]][["final_features"]]),]
+##raw_ruvg
+model_iso <- iso[rownames(iso) %in% gsub("\\.","-",model_result[["raw_ruvg_edger"]][["final_features"]]),]
+data <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/exp_matrix_list.rds"
+data <- readRDS(url(URLencode(data), "rb"))
+sampleNames <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/training_samples.rds"
+sampleNames <- readRDS(url(URLencode(sampleNames), "rb"))
+raw_ruvg <- as.data.frame(data[["raw_ruvg"]])
+###table5
+raw_ruvg <- raw_ruvg[rownames(raw_ruvg) %in% gsub("\\.","-",model_result[["raw_ruvg_edger"]][["final_features"]]),names(raw_ruvg) %in% sampleNames] 
+raw_ruvg <- raw_ruvg %>% t() %>% as.data.frame()
+raw_ruvg <- merge(raw_ruvg,ann_col,by = 0)
+raw_ruvg$Type <- ifelse(raw_ruvg$Type=="Cancer",1,0)
+table5 <- data.frame()
+model_iso$level <- get_diff_level(model_iso)
+model_iso$FDR <- p.adjust(model_iso$PValue,method = "fdr")
+for (i in gsub("\\.","-",model_result[["raw_ruvg_edger"]][["final_features"]])) {
+  re <- data.frame(isomiR_sequence=strsplit(i,"_")[[1]][2],`isomiR name`=i,miRNA=strsplit(i,"_")[[1]][3],
+                   mean_cancers=mean(raw_ruvg[[i]][raw_ruvg$Type==1]),
+                   mean_controls=mean(raw_ruvg[[i]][raw_ruvg$Type==0]),
+                   AUC=roc(raw_ruvg$Type,raw_ruvg[[i]],smooth = F)[["auc"]],
+                   P_value=model_iso$PValue[rownames(model_iso)==i],
+                   logFC=model_iso$logFC[rownames(model_iso)==i],
+                   FDR=model_iso$FDR[rownames(model_iso)==i],
+                   Change=model_iso$level[rownames(model_iso)==i]
+                   )
+  table5 <- rbind(re,table5)
+}
+write.table(table5,"./paper/fig3/Table5.xls",quote = F,row.names = F,sep = "\t")
+##i=TCGA
+raw_ruvg$seq <- rownames(raw_ruvg) %>% lapply(function(x) strsplit(x,"_")[[1]][2]) %>% unlist() 
+raw_ruvg <- raw_ruvg[raw_ruvg$seq %in% gsub("\\.","-",model_result[["TCGA"]][["final_features"]]),names(raw_ruvg) %in% sampleNames]
+##i=raw_ruvg
+raw_ruvg <- raw_ruvg[rownames(raw_ruvg) %in% gsub("\\.","-",model_result[["raw_ruvg_edger"]][["final_features"]]),names(raw_ruvg) %in% sampleNames]
+##model iso热图
+train <- raw_ruvg
+ann_col <- all_ann_col
+col <- all_col
+ann_col <- ann_col[which(rownames(ann_col) %in% names(train)),]
+col$Stage <- col$Stage[which(names(col$Stage) %in% c("Normal","NAA","CRC I/II","CRC III/IV"))]
+col$Type <- col$Type[which(names(col$Type) %in% c("Control","Cancer"))]
+train <- train %>% dplyr::select(sample(rownames(ann_col)[which(ann_col$Stage=="Normal")],length(rownames(ann_col)[which(ann_col$Stage=="Normal")])),rownames(ann_col)[which(ann_col$Stage=="NAA")],rownames(ann_col)[which(ann_col$Stage=="CRC I/II")],rownames(ann_col)[which(ann_col$Stage=="CRC III/IV")])
+rownames(train) <- gsub("iso[^_]*_", "iso-", rownames(train))
+rownames(train) <- gsub("_", "-", rownames(train))
+p2 <- pheatmap::pheatmap(train,show_rownames = T,show_colnames = F,cluster_cols = F,annotation_col = ann_col,annotation_colors = col,color = colorRampPalette(colors = c('steelblue','white' ,'firebrick'))(200),scale = "row",clustering_method = "complete",treeheight_row=100,clustering_distance_rows = "euclidean",legend_breaks=c(-1:1),breaks=seq(-1,1,0.01))
+ggsave("./paper/fig3/raw_ruvg_isomiRs_heatmap.pdf",p2,width = 10,height = 4)
+raw_ruvg$isomiRs <- rownames(raw_ruvg)
+dt <- reshape2::melt(raw_ruvg)
+names(dt)[2] <- "Sample"
+all_data <- ann_col
+all_data$Sample <- rownames(all_data)
+dt <- base::merge(dt,all_data)
+re <- dt %>% group_by(isomiRs) %>% summarise(y = max(value))
+dt <- base::merge(dt,re)
+my_comparisons <- list(c("Control","Cancer"))
+model_iso$isomiRs <- rownames(model_iso)
+dt <- base::merge(dt,model_iso)
+dt <- dt %>%
+  mutate(signif = case_when(
+    PValue < 0.001 ~ "***",
+    PValue < 0.01 ~ "**",
+    PValue < 0.05 ~ "*",
+    TRUE ~ "ns"  # ns 表示不显著
+  ))
+dt$isomiRs <- gsub("iso[^_]*_", "iso-", dt$isomiRs)
+dt$family <- gsub(".*_","",dt$isomiRs)
+dt$isomiRs <- gsub("_.*", "", dt$isomiRs)
+p <- ggplot(dt,aes(x=Type,y=value,color = Type)) +
+  geom_boxplot(outlier.color = "white") + theme_bw() +
+  stat_compare_means(comparisons = my_comparisons,method = "wilcox.test",method.args=list(alternative="two.sided"),lab el="p.signif",color="black",vjust=1.5,hide.ns=T,size=5,symnum.args = list(cutpoints = c(0, 0.001, 0.01, 0.05, Inf), symbols = c("", "", "", "")))+
+  #stat_compare_means(comparisons = my_comparisons,method = "wilcox.test",method.args=list(alternative="two.sided"),label="p.signif",color="black",vjust=1.5,hide.ns=T,size=3)+
+  #geom_point(aes(color=Type),position=position_jitterdodge(jitter.width =0.1))+
+  geom_jitter(width = 0.1,size=1) +
+  facet_wrap(.~isomiRs+family,ncol =3,scales = "free_y",shrink=FALSE) +
+  theme(strip.background=element_rect(color="black",fill="white"),strip.text=element_text(size = 15),legend.position = 'none',plot.title = element_text(size = 15,hjust = 0.5),axis.title.x = element_text(size = 25),
+            axis.title.y = element_text(size = 25),axis.text.x = element_text(size = 25,color="black"),legend.text=element_text(size = 25),axis.text.y = element_text(size = 25,color="black"),panel.grid.major=element_blank(),panel.grid.minor=element_blank())+
+  xlab("")+ylab("")+ labs(title = "") +
+  geom_text(aes(x=2.3,y=y,label=paste0("logFC: ",round(logFC,3))),color="black",check_overlap = T,vjust=-1.6,hjust=0.5,size=3) +
+  geom_text(aes(x=1.5,y=y,label=format(PValue, scientific = TRUE, digits = 3)),color="black",check_overlap = T,vjust=-1.6,hjust=0.5,size=3) +
+  geom_text(aes(x=1.5,y=y,label=signif),color="black",check_overlap = T,vjust=1,hjust=0.5,size=3) +
+  #geom_hline(yintercept = cut_off, color = 'red', size = 0.5,linetype="dashed") +
+  scale_color_manual(values = c("firebrick","steelblue"))  
+ggsave("./paper/fig3/TCGA_isomiRs_boxplot_test.pdf",p,width = 15,height = 18)
+ggsave("./paper/fig3/raw_ruvg_isomiRs_boxplot_test.pdf",p,width = 15,height = 18)
+
+TCGA_data <- read.csv("http://10.30.10.200:10085//storeData/project/user/anxiaolong/work/make_data/CRC/model_result/TCGA/data/TCGA_CRC_expression_label_select_0.1_5.csv",check.names = F,row.names = 1)
+TCGA_diff <- "http://10.30.10.200:10085//storeData/project/user/anxiaolong/work/make_data/CRC/model_result/TCGA/data/TCGA_CRC_expression_label_select_0.1_5_genes_result.rds"
+TCGA_diff <- readRDS(url(URLencode(TCGA_diff), "rb"))
+sub_TCGA <- TCGA_data[gsub("_.*","",rownames(TCGA_data)) %in% c("Type",model_iso$seq),] %>% t() %>% as.data.frame()
+sub_TCGA$Type <- as.character(sub_TCGA$Type)
+x <- list(TCGA=gsub("_.*","",rownames(TCGA_diff)),
+          Model_isomiR=model_iso$seq
+)
+p1 <- ggvenn(x,show_percentage=F,stroke_size=0,set_name_size = 8,text_size = 10,fill_color = c("firebrick","royalblue"),fill_alpha = 0.7,auto_scale = F) +
+  scale_y_continuous(limits = c(-1, 1.5))
+ggsave("./paper/fig3/model_iso_TCGA_venn_precent.pdf",p1,width = 5,height = 5)
+
+df <-sub_TCGA
+df$isomiRs <- names(df)[2]
+names(df)[2] <- "value"
+TCGA_diff$isomiRs <- rownames(TCGA_diff)
+df <- base::merge(df,TCGA_diff,all.x = T)
+df <- df %>%
+  mutate(signif = case_when(
+    PValue < 0.001 ~ "***",
+    PValue < 0.01 ~ "**",
+    PValue < 0.05 ~ "*",
+    TRUE ~ "ns"  # ns 表示不显著
+  ))
+re <- df %>% group_by(isomiRs) %>% summarise(y = max(value))
+df <- base::merge(df,re)
+df$Type <- ifelse(df$Type==1,"Cancer","Control")
+p <- ggplot(df,aes(x=Type,y=value,color = Type)) +
+  geom_boxplot(outlier.color = "white") + theme_bw() +
+  stat_compare_means(comparisons = my_comparisons,method = "wilcox.test",method.args=list(alternative="two.sided"),label="p.signif",color="black",vjust=1.5,hide.ns=T,size=5,symnum.args = list(cutpoints = c(0, 0.001, 0.01, 0.05, Inf), symbols = c("", "", "", "")))+
+  #stat_compare_means(comparisons = my_comparisons,method = "wilcox.test",method.args=list(alternative="two.sided"),label="p.signif",color="black",vjust=1.5,hide.ns=T,size=3)+
+  #geom_point(aes(color=Type),position=position_jitterdodge(jitter.width =0.1))+
+  geom_jitter(width = 0.1,size=1) +
+  facet_wrap(.~isomiRs+family,ncol =3,scales = "free_y",shrink=FALSE) +
+  theme(strip.background=element_rect(color="black",fill="white"),strip.text=element_text(size = 15),legend.position = 'none',plot.title = element_text(size = 15,hjust = 0.5),axis.title.x = element_text(size = 25),
+            axis.title.y = element_text(size = 25),axis.text.x = element_text(size = 25,color="black"),legend.text=element_text(size = 25),axis.text.y = element_text(size = 25,color="black"),panel.grid.major=element_blank(),panel.grid.minor=element_blank())+
+  xlab("")+ylab("")+ labs(title = "") +
+  geom_text(aes(x=2.3,y=y,label=paste0("logFC: ",round(logFC,3))),color="black",check_overlap = T,vjust=-1.6,hjust=0.5,size=3) +
+  geom_text(aes(x=1.5,y=y,label=format(PValue, scientific = TRUE, digits = 3)),color="black",check_overlap = T,vjust=-1.6,hjust=0.5,size=3) +
+  geom_text(aes(x=1.5,y=y,label=signif),color="black",check_overlap = T,vjust=1,hjust=0.5,size=3) +
+  #geom_hline(yintercept = cut_off, color = 'red', size = 0.5,linetype="dashed") +
+  scale_color_manual(values = c("firebrick","steelblue"))  
+ggsave("./paper/fig3/raw_ruvg_isomiRs_in_TCGA_boxplot.pdf",p,width = 5,height = 4.5)
+
+ROC_line_3 <- function(train,test,val,title){
+  train_r <- roc(train$label,train$pre_proba,smooth = F)
+  test_r <- roc(test$label,test$pre_proba,smooth = F)
+  val_r <- roc(val$label,val$pre_proba,smooth = F)
+  data_train <- data_ci(train_r)
+  data_test <- data_ci(test_r)
+  data_val <- data_ci(val_r)
+  train_a <- ci(train_r)
+  test_a <- ci(test_r)
+  val_a <- ci(val_r)
+  # p <- roc.test(cpf_r,cpm_r)
+  ggroc(list(Train=train_r,Test=test_r,Validation=val_r),legacy.axes = TRUE,size = 1) +
+    geom_segment(aes(x = 0, xend = 1, y = 0, yend = 1), size=1, color="grey",linetype="dashed")+
+    theme_bw() + 
+    theme(plot.title = element_text(size = 25),axis.title.x = element_text(size = 25),
+          axis.title.y = element_text(size = 25),axis.text.x = element_text(size = 25,color="black"),legend.text=element_text(size = 25),axis.text.y = element_text(size = 25,color="black"),panel.grid.major=element_blank(),panel.grid.minor=element_blank()) +
+    xlab("1 - Specificity") + ylab("Sensitivity") + ggtitle(title) +
+    scale_color_manual(values = c("#FFB90F","#0072B5FF","firebrick"),name=NULL,label=c("IRP","IRE","Combine")) +
+    # geom_point(aes(x=1-cut_off_diy(train,cut_off)[2],y=cut_off_diy(train,cut_off)[1]),size=2,color=pal_nejm("default")(4)[1],alpha=0.9) +
+    # geom_point(aes(x=1-cut_off_diy(test,cut_off)[2],y=cut_off_diy(test,cut_off)[1]),size=2,color=pal_nejm("default")(4)[2],alpha=0.9) +
+    # geom_point(aes(x=1-cut_off_diy(val,cut_off)[2],y=cut_off_diy(val,cut_off)[1]),size=2,color=pal_nejm("default")(4)[3],alpha=0.9) +
+    annotate("text", x = 0.55, y = 0.35, hjust = 0,color = "#FFB90F",size=6,label = paste(paste(paste0("AUC : ",round(as.numeric(train_r$auc),3)),paste0("95% ","CI :",round(train_a[1],3),"-",round(train_a[3],3)),sep="\n"),sep = "\n"))+
+    annotate("text", x = 0.55, y = 0.2, hjust = 0,color = "#0072B5FF",size=6,label = paste(paste(paste0("AUC : ",round(as.numeric(test_r$auc),3)),paste0("95% ","CI :",round(test_a[1],3),"-",round(test_a[3],3)),sep="\n"),sep = "\n"))+
+    annotate("text", x = 0.55, y = 0.05, hjust = 0,color = "firebrick",size=6,label = paste(paste(paste0("AUC : ",round(as.numeric(val_r$auc),3)),paste0("95% ","CI :",round(val_a[1],3),"-",round(val_a[3],3)),sep="\n"),sep = "\n"))+
+    geom_ribbon(data = data_train,aes(ymin=lower,ymax=upper,x=1-x),fill = "#FFB90F",alpha=0.2,inherit.aes = F) +
+    geom_ribbon(data = data_test,aes(ymin=lower,ymax=upper,x=1-x),fill = "#0072B5FF",alpha=0.2,inherit.aes = F) +
+    geom_ribbon(data = data_val,aes(ymin=lower,ymax=upper,x=1-x),fill = "firebrick",alpha=0.2,inherit.aes = F) 
+}
+p1 <- ROC_line_3(train,test,val,"")
+ggsave(paste0(path,"/train_cpf_cpm_combine_roc_plot.pdf"),p1,width = 9,height = 6)
+```
+
+### 生存分析
+
+```{r life}
+library("survival")
+library("survminer")
+library("openxlsx")
+library("cowplot")
+library("dplyr")
+library("glmnet")
+library("patchwork")
+set.seed(1234)
+get_diff_level <- function(iso) {return(factor(ifelse(iso[["PValue"]] < 0.05 & abs(iso[["logFC"]]) > 1, ifelse( iso[["logFC"]] > 1 ,'Up','Down'),'No'),levels=c('Up','Down','No')))}
+group <- readxl::read_xlsx("G:/work/make_data/CRC/data_2/CRC_最终版(3).xlsx",sheet = "汇总")
+# group <- readxl::read_xlsx("G:/work/make_data/CRC/data_2/CRC_最终版(3).xlsx",sheet = "汇总")
+names(group)[1] <- "sample"
+group$性别 <- gsub("男","Male",group$性别)
+group$性别 <- gsub("女","Female",group$性别)
+group$建模分组 <- gsub("normal","Normal",group$建模分组)
+group$建模分组 <- gsub("benign lesions","NAA",group$建模分组)
+group$建模分组 <- gsub("CRC-stageIII|CRC-stageIV","CRC III/IV",group$建模分组)
+group$建模分组 <- gsub("CRC-stageI|CRC-stageII","CRC I/II",group$建模分组)
+group$Type <- group$建模分组
+group$Type <- gsub("Normal|NAA","Control",group$Type)
+group$Type <- gsub("CRC I/II|CRC III/IV","Cancer",group$Type)
+ann_col <- data.frame(row.names = group$sample,Type=group$Type,Stage=group$建模分组,Age=group$年龄,Gender=group$性别)
+model_result <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/train_eval_result_v2.rds"
+model_result <- readRDS(url(URLencode(model_result), "rb"))
+sample_info <- openxlsx::read.xlsx(xlsxFile = "./paper/fig3/CRC_new.xlsx",sheet = 1)
+# sample_info <- openxlsx::read.xlsx(xlsxFile = "/storeData/project/15-NHpreStudy_miRNA/01-user/03-bianzilong/input/CRC_new.xlsx",sheet = 1)
+data <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/exp_matrix_list.rds"
+data <- readRDS(url(URLencode(data), "rb"))
+# load(file="./paper/fig3/miRNA_log_z.Rdata")
+raw_ruvg <- data[["raw_ruvg"]] %>% t() %>% as.data.frame()
+rownames_saved <- rownames(raw_ruvg)
+raw_ruvg <- apply(raw_ruvg,2,function(x) log2(x+1))
+raw_ruvg <- as.data.frame(raw_ruvg)
+rownames(raw_ruvg) <- rownames_saved
+
+sample_info <- sample_info[,c(14,15,17,19,20 , 21)]
+colnames(sample_info) <- c("os_time" , "status"  , "fufa" , "dfs" ,"lims" , "stage")
+sample_info$id <- sample_info$lims
+
+predict_score_test <- data.frame(Sample=names(model_result$raw_ruvg_edger$all_test_pred),pre_proba=model_result$raw_ruvg_edger$all_test_pred)
+predict_score_train <- data.frame(Sample=names(model_result$raw_ruvg_edger$train_pred),pre_proba=model_result$raw_ruvg_edger$train_pred)
+predict_score <- rbind(predict_score_train,predict_score_test)
+life_score <- predict_score[match(sample_info$lims,predict_score$Sample),]
+sample_info$model_score <- as.numeric(life_score$pre_proba)
+sample_info <- sample_info %>% mutate(status = if_else(status == "死亡", 1, 0)) %>% filter(fufa != "不详") %>% mutate(fufa = if_else(fufa == "是", 1, 0))
+result <- cbind(subset(sample_info,lims%in%intersect(sample_info$lims,rownames(raw_ruvg))),raw_ruvg[intersect(sample_info$lims,rownames(raw_ruvg)),])
+re <- data.frame(lims=rownames(ann_col),age=ann_col$Age,gender=ann_col$Gender)
+result <- merge(re,result,all.y = T)
+result <- result[,names(result) != "id"]
+rownames(result) <- result$lims
+result$gender <- ifelse(result$gender=="Female",1,0)
+result <- result[result$stage != "Tis",]
+result$os_time <- result$os_time*365
+result$dfs <- result$dfs*365
+iso <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/raw_ruvg_edger_result.rds"
+iso <- readRDS(url(URLencode(iso), "rb"))
+iso$level <- get_diff_level(iso)
+iso <- iso[iso$level!="No",]
+result <- result %>% select(names(result)[1:9],rownames(iso))
+pFilter=0.05 
+outResult=data.frame() 
+sigGenes=c("os_state","os_time")
+for(i in 9:dim(result)[2]){ #从第3列开始循环，因为1列2列不是gene，是surstat和surtime
+  tdcox <- coxph(Surv(os_time, status) ~ result[,i], data = result)#开始逐一循环cox分析
+  tdcoxSummary = summary(tdcox) #summary命令对tdcox总结，方面后面提取数据
+  pvalue=tdcoxSummary$coefficients[,"Pr(>|z|)"] #提取p值，这个主要是后面提取有意义的gene用
+  if(pvalue<pFilter){ # 这里我们不需要提取所有基因的数据，只需要有意义的gene的结果，所以设置如果pvalue<0.05才提取数据
+    sigGenes=c(sigGenes,i)
+    outResult=rbind(outResult,#合并行，实际上是对循环结果的合并，前面设置的空白数据框outResult这里用，循环必须有个开始
+                    cbind(id=i,#合并列，是每个基因的统计数据
+                          HR=tdcoxSummary$conf.int[,"exp(coef)"],#提取单个基因的HR
+                          coef=tdcoxSummary$coefficients[,1],
+                          se=tdcoxSummary$coefficients[,3],
+                          L95CI=tdcoxSummary$conf.int[,"lower .95"],#提取单个基因的HR的95%CI低值
+                          H95CI=tdcoxSummary$conf.int[,"upper .95"],#提取单个基因的HR的95%CI高值
+                          pvalue=tdcoxSummary$coefficients[,"Pr(>|z|)"])#提取单个基因的p值
+    )
+  }
+}
+outResult=subset(outResult,pvalue<0.05)
+result$stage[result$stage == "CRC-stageI"] = 1
+result$stage[result$stage == "CRC-stageII"] = 2
+result$stage[result$stage == "CRC-stageIII"] = 3
+result$stage[result$stage == "CRC-stageIV"] = 4
+result$stage=as.numeric(result$stage)
+frm=as.formula(paste0("Surv(os_time , status) ~",paste(
+                     paste0(" `",colnames(result)[outResult$id],"` "),collapse="+")))
+x <- model.matrix(frm, data = result)[, -1]  # Remove intercept
+y <- Surv(result$os_time, result$status)
+lasso_model <- cv.glmnet(x, y, family = "cox", alpha = 0.4)
+selected_features_lasso <- coef(lasso_model, s = "lambda.min")
+# 获取非零系数（选择的特征）的名称
+selected_feature_names_lasso <- rownames(selected_features_lasso)[selected_features_lasso[, 1] != 0]
+# selected_feature_names_lasso <- selected_feature_names_lasso[selected_feature_names_lasso != "`iso-18-UL21XXZ_TAATACAACCTGCTAAGT_hsa-miR-374c-5p`"]
+frm=as.formula(paste0("Surv(os_time , status) ~","age+gender+stage+",paste(
+                     paste0(selected_feature_names_lasso),collapse="+")))
+multicox <- coxph(frm,data = result)
+multicox_step=step(multicox)
+frm=as.formula(paste0("Surv(os_time , status) ~","gender+",paste(
+                     paste0(names(multicox_step$coefficients)),collapse="+")))
+multicox <- coxph(frm,data = result)
+# 生存曲线
+mss=summary(multicox)
+mss_coef=mss$coefficients
+coef=as.data.frame(mss_coef)
+coef$name=rownames(coef)
+colnames(coef)
+coef$name <- gsub("iso[^_]*_", "iso-", coef$name)
+coef$name <- gsub("_", "-", coef$name)
+coef$name <- gsub("`", "", coef$name)
+coef$name <- gsub("\\bgender\\b", "Gender", coef$name)
+coef$name <- gsub("\\bage\\b", "Age", coef$name)
+coef$name <- gsub("\\bstage\\b", "Stage", coef$name)
+coef <- rbind(coef[2,],coef[-2,])
+# coef <- coef[c(4,2,1,3),]
+p <- ggforestplot::forestplot(df = coef,
+                        estimate = coef,
+                        se = `se(coef)`,
+                    pvalue = `Pr(>|z|)`,
+                        psignif = 0.05,
+                            xlab = "HR",
+                            title = "",
+                            logodds = T)
+# ggsave("./paper/fig3/multi_cox_step_fsplot_score.pdf",plot = p,width = 4,height = 2)
+ggsave("./paper/fig3/multi_cox_step_fsplot.pdf",plot = p,width = 8,height = 8)
+
+# re <- result
+# # names(re) <- gsub("iso[^_]*_", "iso-", names(re))
+# names(re) <- gsub("_", "-", names(re))
+theme2 <- theme(axis.ticks.x = element_blank(), ## 删去所有刻度线
+                axis.text.x = element_blank(),
+                axis.title.x = element_blank())
+# for (i in coef$name) {
+#   if(i=="Age"){
+#     re$age <- ifelse(re$age>=60,1,0)
+#     fit <- survfit(Surv(`os-time` , status)~age,data = re)
+#     p <- ggsurvplot(fit,data = re,palette = "nejm",pval.method = T,pval = T,conf.int = T,risk.table = T,xlab="Time/Days",legend.labs=c("Low","High"))
+#   }else if(i == "Gender"){
+#     fit <- survfit(Surv(`os-time` , status)~gender,data = re)
+#     p <- ggsurvplot(fit,data = re,palette = "nejm",pval.method = T,pval = T,conf.int = T,risk.table = T,xlab="Time/Days",legend.labs=c("male","Female"))
+#   }else if(i == "Stage"){
+#     fit <- survfit(Surv(`os-time` , status)~stage,data = re)
+#     p <- ggsurvplot(fit,data = re,palette = "nejm",pval.method = T,pval = T,conf.int = T,risk.table = T,xlab="Time/Days")
+#   }else{
+#     re[[i]] <- ifelse(re[[i]] >= mean(re[[i]]),1,0)
+#     fit <- survfit(Surv(`os-time` , status)~re[,i],data = re)
+#     p <- ggsurvplot(fit,data = re,palette = "nejm",xlab="Time/Days",pval.method = T,pval = T,conf.int = T,risk.table = T,legend.labs=c("Low","High"))
+#   }
+#   p_up <- p$plot + theme2
+#   p_down <- p$table
+#   pdf(file=paste0("./paper/fig3/survplot/",i,"_survplot.pdf"),width = 6,height = 5)
+#   print(p_up/p_down+plot_layout(heights = c(5,2)))
+#   dev.off()
+# }
+for (m in c("iso","age")) {
+  re <- result
+  if(m=="iso"){
+    frm=as.formula(paste0("Surv(os_time , status) ~",paste(paste0(names(multicox_step$coefficients)[-c(1:2)]),collapse="+")))
+    multicox <- coxph(frm,data = re)
+    re$score <- multicox$linear.predictors
+    mss=summary(multicox)
+    mss_coef=mss$coefficients
+    coef=as.data.frame(mss_coef)
+    coef$name=rownames(coef)
+    colnames(coef)
+    coef$name <- gsub("iso[^_]*_", "iso-", coef$name)
+    coef$name <- gsub("_", "-", coef$name)
+    coef$name <- gsub("`", "", coef$name)
+    coef$name <- gsub("\\bgender\\b", "Gender", coef$name)
+    coef$name <- gsub("\\bage\\b", "Age", coef$name)
+    coef$name <- gsub("\\bstage\\b", "Stage", coef$name)
+    coef <- rbind(coef[2,],coef[-2,])
+    # coef <- coef[c(4,2,1,3),]
+    p <- ggforestplot::forestplot(df = coef,
+                            estimate = coef,
+                            se = `se(coef)`,
+                        pvalue = `Pr(>|z|)`,
+                            psignif = 0.05,
+                                xlab = "HR",
+                                title = "",
+                                logodds = T)
+    # ggsave("./paper/fig3/multi_cox_step_fsplot_score.pdf",plot = p,width = 4,height = 2)
+    ggsave("./paper/fig3/multi_cox_step_fsplot_isomiR.pdf",plot = p,width = 8,height = 8)
+  }else if(m=="age"){
+    frm=as.formula(paste0("Surv(os_time, status) ~ age + gender + stage + score"))
+    re$score <- multicox$linear.predictors
+    multicox <- coxph(frm,data = re)
+    re$score <- multicox$linear.predictors
+    mss=summary(multicox)
+    mss_coef=mss$coefficients
+    coef=as.data.frame(mss_coef)
+    coef$name=rownames(coef)
+    colnames(coef)
+    coef$name <- gsub("iso[^_]*_", "iso-", coef$name)
+    coef$name <- gsub("_", "-", coef$name)
+    coef$name <- gsub("`", "", coef$name)
+    coef$name <- gsub("\\bgender\\b", "Gender", coef$name)
+    coef$name <- gsub("\\bage\\b", "Age", coef$name) 
+    coef$name <- gsub("\\bstage\\b", "Stage", coef$name)
+    coef <- rbind(coef[2,],coef[-2,])
+    coef <- coef[c(4,2,1,3),]
+    p <- ggforestplot::forestplot(df = coef,
+                            estimate = coef,
+                            se = `se(coef)`,
+                        pvalue = `Pr(>|z|)`,
+                            psignif = 0.05,
+                                xlab = "HR",
+                                title = "",
+                                logodds = T)
+    ggsave("./paper/fig3/multi_cox_step_fsplot_score.pdf",plot = p,width = 4,height = 2)
+  }
+  for (s in c("all","stage12","stage34")) {
+    if(s=="all"){
+      res <- re
+    }else if(s=="stage12"){
+      res <- re[re$stage %in% c(1,2),]
+    }else if(s=="stage34"){
+      res <- re[re$stage %in% c(3,4),]
+    }
+    res[["score"]] <- ifelse(res[["score"]] >= median(res[["score"]]),1,0)
+    hr <- summary(coxph(Surv(os_time , status)~score,data = res))
+    hr[["conf.int"]] <- round(hr[["conf.int"]],3)
+    HR <- paste0("HR = ",hr[["conf.int"]][[1]]," (",hr[["conf.int"]][[3]]," - ",hr[["conf.int"]][[4]],")")
+    
+    fit <- survfit(Surv(os_time , status)~score,data = res)
+    p <- ggsurvplot(fit,data = res,palette = "nejm",xlab="Time/Days",pval.method = T,pval = T,conf.int = T,risk.table = T,legend.labs=c("Low","High"))
+    p_up <- p$plot + theme2 +
+      annotate("text", x = max(res$os_time)/50, y = 0.1,
+                        label= HR,size = 5,hjust = 0) 
+    p_down <- p$table
+    pdf(file=paste0("./paper/fig3/survplot/multicox_",m,"_score_",s,"_survplot.pdf"),width = 6,height = 5)
+    print(p_up/p_down+plot_layout(heights = c(5,2)))
+    dev.off()
+  }
+}
+###ROC
+score=multicox$linear.predictors
+library(timeROC)
+# install.packages("timeROC")
+tROC <-timeROC(T=result$os_time,delta = result$status,marker = score,
+               cause = 1,times = c(1*365,3*365,5*365),ROC=T
+)
+#开始画图
+pdf(file="./paper/fig3/auc.pdf",width = 8*0.6,height = 8*0.6)
+par(mar= c(5,5,1,1),cex.lab=1.5,cex.axis= 1.2) #设置图形边界
+plot(tROC,time=1*365,col="red",title=F,lwd=2) #1年ROC
+plot(tROC,time=3*365,col="green",add=T,title=F,lwd=2) #3年ROC
+plot(tROC,time=5*365,col="blue",add=T,title=F,lwd=2) #5年ROC
+legend("bottomright", # 这里设置legend的位置坐标：横坐标0,纵坐标1。也可以像前面一样设置为"bottomright"等
+       c(paste0("AUC at 1 years  ", round(tROC$AUC[1], 3)),
+         paste0("AUC at 3 years  ", round(tROC$AUC[2], 3)),
+         paste0("AUC at 5 years  ", round(tROC$AUC[3], 3))),
+       col=c("red","green","blue"),lwd=2,cex=1.2,bty="n")
+dev.off()
+c_index=c(mss$concordance[1],
+          mss$concordance[1]-1.96*mss$concordance[2],
+          mss$concordance[1]+1.96*mss$concordance[2])
+names(c_index)=c("C-index","lower","upper")
+c_index <- round(c_index,3)
+library(survival)
+library(rms)
+library(regplot)
+f2 <- cph(frm
+          , x=T, y=T , data = result,surv = T,time.inc = 365)
+try({cal1 <- calibrate(f2, 
+                  cmethod='KM', 
+                  method="boot", 
+                  u=365, # u需要与之前模型中定义好的time.inc一致，即365或730；
+                  m=110, #每次抽样的样本量，
+                  B=1000) #抽样次数
+}, silent = FALSE)
+## m要根据样本量来确定，由于标准曲线一般将所有样本分为3组（在图中显示3个点）
+## 绘制校正曲线
+f2 <- cph(frm
+          , x=T, y=T , data = result,surv = T,time.inc = 1095)
+try({cal2 <- calibrate(f2, 
+                  cmethod='KM', 
+                  method="boot", 
+                  u=1095, # u需要与之前模型中定义好的time.inc一致，即365或730；
+                  #u=730,
+                  m=110, #每次抽样的样本量，
+                  B=1000)
+}, silent = FALSE)
+f2 <- cph(frm
+          , x=T, y=T , data = result,surv = T,time.inc = 1825)
+try({cal3 <- calibrate(f2,
+                  cmethod='KM', 
+                  method="boot", 
+                  u=1825, # u需要与之前模型中定义好的time.inc一致，即365或730；
+                  #u=1095,
+                  m=110, #每次抽样的样本量，
+                  B=1000)
+}, silent = FALSE)
+
+
+pdf(file="./paper/fig3/Calibration.pdf", width = 8*0.65,height = 8*0.65)
+plot(cal1,lwd=2,lty=1,
+     conf.int=T,# 是否显示置信区间
+     errbar.col=c(rgb(5,110,188 , maxColorValue = 255) ),#直线曲线bar颜色
+     #col="red", # 曲线颜色
+     xlim=c(0,1),ylim=c(0,1),
+     xlab="Nomogram predicted survival probability",
+     ylab="Observed fraction survival probability",
+     col = c(rgb(5,110,188 , maxColorValue = 255)),
+     main = "Calibration curve" ,
+     subtitles = F)#不显示副标题
+
+
+plot(cal2,lwd=2,lty=1,
+     #conf.int=T,# 是否显示置信区间
+     errbar.col=c(rgb(234,196,19 , maxColorValue = 255) ),#直线曲线bar颜色
+     #col="red", # 曲线颜色
+     xlim=c(0,1),ylim=c(0,1),
+     add = TRUE,
+     xlab="Nomogram predicted survival probability",
+     ylab="Observed fraction survival probability",
+     col = c(rgb(234,196,19 , maxColorValue = 255)),
+     subtitles = F)#不显示副标题
+
+
+plot(cal3,lwd=2,lty=1,
+     conf.int=T,# 是否显示置信区间
+     errbar.col=c(rgb(137,137,137 , maxColorValue = 255)),#直线曲线bar颜色
+     #col="red", # 曲线颜色
+     xlim=c(0,1),ylim=c(0,1),
+     add = TRUE,
+     xlab="Nomogram predicted survival probability",
+     ylab="Observed fraction survival probability",
+     col = c(rgb(137,137,137 , maxColorValue = 255)),
+     subtitles = F)#不显示副标题
+
+
+lines(cal1[,c('mean.predicted' , "KM")] , type = "b" , lwd = 2 ,  col = c(rgb(5,110,188 , maxColorValue = 255)),pch = 16)
+lines(cal1[,c('mean.predicted' , "KM")] , type = "b" , lwd = 2 ,  col = c(rgb(137,137,137 , maxColorValue = 255)),pch = 16)
+abline(0,1,lwd = 2 , col = "grey")
+legend("bottomright" , 
+       legend = c("1-year" , "3-year" , "5-year" ,"Ideal line") ,
+       col = c("#056EBC" , "#EAC413" , "#898989" , "grey"),
+       lwd = 2 , 
+       cex = 0.8 ,
+       bty = "n" ,
+       ncol = 1,
+       x.intersp = 0.4,
+       y.intersp = 1)
+text(x= 0.4, y= 1,paste0("C-index = ",c_index[[1]]," (",c_index[[2]],"-",c_index[[3]],")"))
+
+dev.off()
+# write.csv(re[,c("age","gender","os_time","status","stage","score")],"./paper/fig3/survplot/survplot_data.csv",quote = F,row.names = F)
+```
+
+
+```{r result}
+data <- predict_score
+names(data)[1] <- "sample"
+group <- readxl::read_xlsx("G:/work/make_data/CRC/data_2/CRC_最终版(2).xlsx",sheet = "汇总")
+names(group)[1] <- "sample"
+group$性别 <- gsub("男","Male",group$性别)
+group$性别 <- gsub("女","Female",group$性别)
+group$建模分组 <- gsub("normal","Normal",group$建模分组)
+group$建模分组 <- gsub("benign lesions","Benign lesions",group$建模分组)
+ann_col <- data.frame(sample = group$sample,Stage=group$建模分组,Age=group$年龄,Gender=group$性别,病理信息=group$病理信息)
+df <- merge(data,ann_col)
+df <- df[df$Stage %in% c("AA","SSA"),]
+df <- df[order(df$pre_proba,decreasing = T),]
+DT::datatable(df,rownames=F,extensions = "Buttons",options = list(dom="Bfrtip",buttons=c("copy","csv","excel","pdf"),paging=FALSE,scrollCollapse=T,scrollY = 500,scrollX = TRUE),editable=FALSE)
+dt <- df[grep("大小",df$病理信息),]
+DT::datatable(dt,rownames=F,extensions = "Buttons",options = list(dom="Bfrtip",buttons=c("copy","csv","excel","pdf"),paging=FALSE,scrollCollapse=T,scrollY = 500,scrollX = TRUE),editable=FALSE)
+get_str_max <- function(x){
+  a <- (strsplit(x,split = "大小|cm|\\*"))
+  m <- max(as.numeric(a[[1]])[-which(is.na(as.numeric(a[[1]])))])
+  return(m)
+}
+dt$size <- c(1:length(dt$病理信息))
+for (i in dt$size) {
+  dt$size[i] <- get_str_max(dt$病理信息[i])
+}
+DT::datatable(dt,rownames=F,extensions = "Buttons",options = list(dom="Bfrtip",buttons=c("copy","csv","excel","pdf"),paging=FALSE,scrollCollapse=T,scrollY = 500,scrollX = TRUE),editable=FALSE)
+p1 <- ggplot(dt,aes(x=pre_proba,y=size))+
+  geom_point() +
+  geom_smooth(method = "lm",formula = y~x,n=100,alpha = 0.2)+
+  theme_bw() + 
+  theme(plot.title = element_text(size = 25),axis.title.x = element_text(size = 25),
+        axis.title.y = element_text(size = 25),axis.text.x = element_text(size = 25,color="black"),legend.text=element_text(size = 25),axis.text.y = element_text(size = 25,color="black"),panel.grid.major=element_blank(),panel.grid.minor=element_blank()) +
+  xlab("Predicted score") + 
+  ggpmisc::stat_poly_eq(aes(label=paste(..eq.label..,..adj.rr.label..,sep = "~~~~~")),method = "lm",formula =y~x, size=5,parse = TRUE) +
+  scale_color_nejm(name="") +
+  scale_fill_nejm(name="")
+ggsave("./paper/fig3/APL_size_cor_line.pdf",width = 5.5,height = 5)
+```
+
+
+```{r result}
+data <- predict_score
+names(data)[1] <- "sample"
+group <- readxl::read_xlsx("G:/work/make_data/CRC/data_2/CRC_最终版(3).xlsx",sheet = "汇总")
+names(group)[1] <- "sample"
+group$性别 <- gsub("男","Male",group$性别)
+group$性别 <- gsub("女","Female",group$性别)
+group$建模分组 <- gsub("normal","Normal",group$建模分组)
+group$建模分组 <- gsub("benign lesions","Benign lesions",group$建模分组)
+ann_col <- data.frame(sample = group$sample,Stage=group$建模分组,Age=group$年龄,Gender=group$性别,Subgroup=group$亚组)
+dt <- merge(data,ann_col)
+dt <- dt[dt$Stage %in% c("AA","SSA"),]
+dt <- dt[!is.na(dt$Subgroup),]
+dt <- melt(dt)
+dt$Subgroup <- factor(dt$Subgroup,levels = c("SA","LGIN","HGIN"))
+p1 <- ggplot(dt[which(dt$variable=="pre_proba"),],aes(x=Subgroup,y=value,color=Subgroup))+
+  geom_boxplot()+
+  geom_quasirandom(width = 0.4,size=1,aes(color=Subgroup)) +
+  theme_bw() + 
+  theme(plot.title = element_text(size = 25),axis.title.x = element_text(size = 25),
+        axis.title.y = element_text(size = 25),axis.text.x = element_text(size = 25,color="black"),legend.text=element_text(size = 25),axis.text.y = element_text(size = 25,color="black"),panel.grid.major=element_blank(),panel.grid.minor=element_blank()) +
+  ylab("Predicted score") + 
+  scale_color_nejm(name="") +
+  scale_fill_nejm(name="")
+ggsave("./paper/fig3/APL_subgroup_boxplot.pdf",width = 6,height = 5)
+```
+
+
+
