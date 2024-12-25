@@ -547,18 +547,8 @@ ggsave("./paper/fig2/iso_family_cpm_venn_precent_Up_Down.pdf",p1,width = 7,heigh
 ### Differential Heatmap and PCA Plot
 
 ```{r heatmap_group}
-group <- readxl::read_xlsx("/path/to/table/CRC.xlsx",sheet = "汇总")
+group <- readxl::read_xlsx("/path/to/table/CRC.xlsx")
 names(group)[1] <- "sample"
-group$性别 <- gsub("男","Male",group$性别)
-group$性别 <- gsub("女","Female",group$性别)
-group$建模分组 <- gsub("normal","Normal",group$建模分组)
-group$建模分组 <- gsub("benign lesions","NAA",group$建模分组)
-group$建模分组 <- gsub("CRC-stageIII|CRC-stageIV","CRC III/IV",group$建模分组)
-group$建模分组 <- gsub("CRC-stageI|CRC-stageII","CRC I/II",group$建模分组)
-
-group$Type <- group$建模分组
-group$Type <- gsub("Normal|NAA","Control",group$Type)
-group$Type <- gsub("CRC I/II|CRC III/IV","Cancer",group$Type)
 ann_col <- data.frame(row.names = group$sample,Type=group$Type,Stage=group$建模分组,Age=group$年龄,Gender=group$性别)
 type_cor <- c("steelblue","#ADB6B6FF","firebrick")
 names(type_cor) <- c("Control","AA","Cancer")
