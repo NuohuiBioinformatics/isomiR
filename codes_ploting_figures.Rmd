@@ -1,5 +1,5 @@
 ---
-title: 'CPF 文章绘图代码汇总'
+title: 'codes of figures'
 author: "Xiao Long .An"
 date: \`r format(Sys.time())`\
 documentclass: ctexart
@@ -13,9 +13,6 @@ classoption: "hyperref,"
 always_allow_html: true
 ---
 
-```{r ps}
-大多数代码都需要同事绘制好几个模型的图,有一些需要换参数就可以绘制另一个模型的图.有时候需要把一部分代码拎出来单独绘制个性化图,且代码适配的是我的建模流程输出的内容,要是其他流程建模出来的,代码仅供参考.建议自己重新写,有参考也不难.
-```
 
 ```{r setup, include=FALSE}
 library(ggstar)
@@ -50,12 +47,11 @@ knitr::opts_chunk$set(
 
 ## fig 1
 
-### 饱和度曲线图
-
+### Saturation Curve Chart
 
 ```{r choose_sample}
 library(XML)
-data_qc <- readHTMLTable("http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/12_UMI_mapping_position_directional_dedup_result/03.rerun.sum/qc/miRNAQC.html",which = 1)
+data_qc <- readHTMLTable("/path/to/QC/html/miRNAQC.html",which = 1)
 names(data_qc)[1] <- "Sample"
 for (i in names(data_qc)[-1]){data_qc[[i]] <- as.numeric(gsub("%","",data_qc[[i]]))}
 data_qc$Sample <- gsub("R03|-.*","",data_qc$Sample)
@@ -66,14 +62,12 @@ group$Stage <- gsub("CRC.*","CRC",group$Stage)
 group$Sample <- rownames(group)
 data_qc <- merge(data_qc,group,all.y = T)
 df <- data.frame(row.names = data_qc$Sample, depth=data_qc$`M raw reads`,group=data_qc$Stage)
-# 计算五等分的边界点
-# 计算五等分的边界点
-breaks <- quantile(df$depth, probs = seq(0, 1, by = 0.2))
 
-# 对边界点进行取整
+# Calculate the boundary points of five equal divisions
+breaks <- quantile(df$depth, probs = seq(0, 1, by = 0.2))
 breaks_rounded <- round(breaks)
 
-# 计算每个分组的五等分区间，并生成区间编号
+# Calculate the five equal intervals for each group and generate interval numbers
 df$depth_interval <- cut(
   df$depth, 
   breaks = breaks, 
@@ -81,44 +75,37 @@ df$depth_interval <- cut(
   labels = FALSE
 )
 
-# 手动设置 labels，并使用取整后的边界点
+# Manually set labels and use the rounded boundary points
 labels <- paste0("(", breaks_rounded[-length(breaks_rounded)], ",", breaks_rounded[-1], "]")
 
-# 计算每个分组的五等分区间，并生成区间范围
+# Calculate the five equal intervals for each group and generate the interval ranges
 df$depth_range <- cut(
   df$depth, 
   breaks = breaks, 
   include.lowest = TRUE, 
   labels = labels
 )
-# 为了确保每个分组都有5个区间，检查是否有空的区间
+# To ensure that each group has 5 intervals, check for any empty intervals
 table(df$group, df$depth_interval)
 
-# 初始化结果列表
 selected_samples <- list()
 
-# 对于每个分组（cancer 和 control）
 for (group in unique(df$group)) {
-  # 初始化该分组的选中样本列表
+
   group_samples <- c()
-  
-  # 对于每个区间
+
   for (interval in 1:5) {
-    # 筛选出属于当前分组和当前区间的样本
     subset_df <- df[df$group == group & df$depth_interval == interval, ]
-    
-    # 如果该区间有样本，随机抽取一个
+
     if (nrow(subset_df) > 0) {
       selected_sample <- subset_df[sample(nrow(subset_df), 1), ]
       group_samples <- rbind(group_samples, selected_sample)
     }
   }
   
-  # 将选中的样本添加到结果列表中
   selected_samples[[group]] <- group_samples
 }
 
-# 转换结果为数据框
 selected_samples_df <- do.call(rbind, selected_samples)
 
 ```
@@ -126,20 +113,14 @@ selected_samples_df <- do.call(rbind, selected_samples)
 ```{r lineplot}
 library(ggsci)
 library(ggstar)
-# data <- read.table("http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/12_UMI_mapping_position_directional_dedup_result/03.rerun.sum/miRNAs_ds/miRNAs_readscount.tsv",header = T,check.names = F) %>% t() %>% as.data.frame()
-# data$isomiRs <- rownames(data)
-selected_samples_df <- read.table("http://10.30.10.200:10085//storeData/project/user/anxiaolong/work/make_data/CRC/model_result/paper-xu/paper_plot/fig1/select_sample.xls")
-data <- read.csv("http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/12_UMI_mapping_position_directional_dedup_result/04.downsample/00.output/isomiRs_readscount_isomirdb.csv",header = T)
-data <- read.csv("http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/12_UMI_mapping_position_directional_dedup_result/04.downsample/00.output/miRNAs_readscount_isomirdb.csv",header = T)
+selected_samples_df <- read.table("/path/to/xls/file/select_sample.xls")
+data <- read.csv("/path/to/table/isomiRs_readscount_isomirdb.csv",header = T)
 dt <- melt(data)
 names(dt)[1] <- "isomiRs"
 dt$deep <- gsub(".*\\.","",dt$variable)
 dt$sample <- gsub("\\..*|R03","",dt$variable)
 group <- data.frame(sample=gsub(".*\\.","",rownames(selected_samples_df)),group=selected_samples_df$group)
 dt <- merge(dt,group,all.x = T)
-# dt <- dcast(dt,sample+isomiRs+group~deep)
-# dt[is.na(dt)] <- 0
-# dt <- dcast(dt,sample+miRNA+group~deep)
 linetype <- c(1000000,500,50,15,5)
 result <- data.frame(sample=c(),group=c(),deep=c(),percent=c(),interval=c())
 for (i in group$sample) {
@@ -160,7 +141,7 @@ result$test <- paste0(result$sample,"_",result$interval)
 group <- df[rownames(df) %in% unique(result$sample),]
 group$sample <- rownames(group)
 result <- merge(result,group)
-saveRDS(result,"G:/work/make_data/CRC/model_result/paper-xu/paper_plot/fig1/miRNA_readscound_stats_result.rds")
+saveRDS(result,"/path/to/figures/miRNA_readscound_stats_result.rds")
 ggplot(result,aes(x=deep,y=percent,group=test,color=interval))+
   geom_line(size=0.75)+
   geom_point(size=6,shape=20,color="white")+
@@ -173,24 +154,20 @@ ggplot(result,aes(x=deep,y=percent,group=test,color=interval))+
   scale_color_nejm(name="Reads",labels=c("5-14","15-49","50-499",">500")) +
   scale_shape_discrete(name="Range")
   
-ggsave("./paper/fig1/miRNA_readscount_plot_CRC_Normal_sample_select.pdf",width = 10,height = 7)
-# ggsave("./paper/fig1/miRNA_readscount_plot.pdf",width = 10,height = 15)
+ggsave("/path/to/figure/miRNA_readscount_plot_CRC_Normal_sample_select.pdf",width = 10,height = 7)
 ```
 
-###  梯度isomiR特征统计图
+###  Gradient isomiR feature statistics chart
 
 ```{r iso_feature}
 library(stringr)
 judge_column <- function(id) {
-  # 将字符串按'_'分割
   parts <- unlist(strsplit(id, '_'))
-  
-  # 提取各个部分
   End5 <- parts[2]
   End3 <- parts[3]
   SNV <- parts[4]
   
-  # 判断字符串属于哪一列
+  # Determine which type the isomiR belongs to
   column <- if ((End5 != '0') & (End3 == '0') & (SNV == '0')) {
     'judge_End5'
   } else if ((End5 == '0') & (End3 != '0') & (SNV == '0')) {
@@ -203,18 +180,14 @@ judge_column <- function(id) {
     'judge_Mixed'
   }
   
-  # 计算字符串长度
   length <- nchar(parts[5])
-  
-  # 计算GC含量
   gc_count <- sum(str_count(parts[5], c('G', 'C')))
   gc_content <- gc_count / length
   
-  # 返回结果
   return(list(column = column, length = length, gc_content = gc_content))
 }
 
-data <- read.table("http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/9_iso_vs_readscount/merge_isomiR_seq.tsv",header = T)
+data <- read.table("/path/to/table/merge_isomiR_seq.tsv",header = T)
 dt <- melt(data)
 dt$deep <- gsub(".*\\.","",dt$variable)
 dt$sample <- gsub("\\..*","",dt$variable)
@@ -245,7 +218,7 @@ ggplot(result,aes(x=deep,y=isoGC,color=deep)) +
   theme(plot.title = element_text(hjust = 0.5),strip.background = element_rect(fill = "white"),axis.text.x = element_text(color="black",size = 12),axis.text.y = element_text(color="black",size = 12)) +
   facet_wrap(~group,ncol = 1)
 
-data_m <- read.delim("http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/9_iso_vs_readscount/hsa.mature.fa",header = F)
+data_m <- read.delim("/path/to/table/hsa.mature.fa",header = F)
 rre <- data.frame(id = data_m$V1[!grepl("h",data_m$V1)])
 GC <- c()
 for (id in rre$id) {
@@ -295,7 +268,7 @@ ggplot(result, aes(x = deep,y=count,fill = isoType)) +
   facet_wrap(~group,ncol = 1) +
   scale_fill_nejm()
 
-data <- read.table("http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/9_iso_vs_readscount/merge_isomiR_seq.tsv",header = T)
+data <- read.table("/path/to/table/merge_isomiR_seq.tsv",header = T)
 df <- melt(data)
 df$deep <- gsub(".*\\.","",df$variable)
 df$sample <- gsub("\\..*","",df$variable)
@@ -322,16 +295,13 @@ ggplot(result, aes(x = deep,color=deep,fill=deep)) +
 ```
 
 ```{r isomiR_type_stats}
+
 judge_column <- function(id) {
-  # 将字符串按'_'分割
   parts <- unlist(strsplit(id, '_'))
-  
-  # 提取各个部分
   End5 <- parts[2]
   End3 <- parts[3]
   SNV <- parts[4]
   
-  # 判断字符串属于哪一列
   if ((End5 != '0') & (End3 == '0') & (SNV == '0')) {
     return('judge_End5')
   } else if ((End5 == '0') & (End3 != '0') & (SNV == '0')) {
@@ -345,15 +315,12 @@ judge_column <- function(id) {
   }
 }
 judge_column_mixed <- function(id) {
-  # 将字符串按'_'分割
   parts <- unlist(strsplit(id, '_'))
-  
-  # 提取各个部分
+
   End5 <- parts[2]
   End3 <- parts[3]
   SNV <- parts[4]
   
-  # 判断字符串属于哪一列
   if ((End5 != '0') & (End3 == '0') & (SNV == '0')) {
     return('judge_End5')
   } else if ((End5 == '0') & (End3 != '0') & (SNV == '0')) {
@@ -374,14 +341,14 @@ judge_column_mixed <- function(id) {
     }
   }
 }
-data <- read.csv("http://10.30.10.200:10085/storeData/project/19-preRD_isomir_CRC/code_figures/3_isomiR%E5%BB%BA%E6%A8%A1%E7%9B%B8%E5%85%B3/matrix_generate/CPM_select.csv",row.names = 1)
+data <- read.csv("/path/to/table/CPM_select.csv",row.names = 1)
 data$isoType <- rownames(data) %>% lapply(judge_column) %>% unlist()
 data <- data[data$isoType=="judge_Canonical",]
 data <- data[,-609]
-write.csv(data,"G:/work/make_data/CRC/model_result/paper-xu/paper_plot/isomiRs_CPM_select_mature_608.csv",row.names = T,quote = F)
+write.csv(data,"/path/to/table/isomiRs_CPM_select_mature_608.csv",row.names = T,quote = F)
 
 
-isoType <- read.csv("http://10.30.10.200:10085//storeData/project/user/anxiaolong/work/sortware/seq2isomiRs/find_isomirs/seq.ouf",sep = "\t")
+isoType <- read.csv("/path/to/output/seq.ouf",sep = "\t")
 data$Sequnce <- rownames(data) %>% strsplit("_") %>% lapply(function(x) x[2]) %>% unlist()
 data$isomiRs <- rownames(data)
 dt <- base::merge(isoType,data,all.x = T)
@@ -396,7 +363,7 @@ dt$isoType <- dt$ID %>% lapply(judge_column) %>% unlist()
 dt <- dt[dt$isoType=="judge_Canonical",]
 df <- dt %>% select(isomiRs,names(dt)[3:610])
 df_unique <- unique(df[order(df$isomiRs), ])
-write.csv(df_unique,"G:/work/make_data/CRC/model_result/paper-xu/paper_plot/isomiRs_CPM_select_mature_608.csv",row.names = F,quote = F)
+write.csv(df_unique,"path/to/table/isomiRs_CPM_select_mature_608.csv",row.names = F,quote = F)
 pie_plot <- function(data,outfile){
   stats_df$label <- paste("(",round(stats_df$value_sum/sum(stats_df$value_sum) * 100, 1), '%)', sep = '')
   stats_df$label <- paste0(stats_df$isoType,stats_df$label)
@@ -420,17 +387,17 @@ pie_plot(stats_df,"./paper/fig1/mixedType_freq_percent_pie_plot.pdf")
 
 ## fig 2 
 
-### 差异火山图
+### Differential Volcano Plot
 
 ```{r vplot}
-de_cpm <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/de_genes_cpm_combat.rds"
+de_cpm <- "/path/to/table/de_genes_cpm_combat.rds"
 de_cpm <- readRDS(url(URLencode(de_cpm), "rb"))
-de_cpf <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/de_genes_irp_combat.rds"
+de_cpf <- "/path/to/table/de_genes_irp_combat.rds"
 de_cpf <- readRDS(url(URLencode(de_cpf), "rb"))
-sampleNames <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/training_samples.rds"
+sampleNames <- "/path/to/table/training_samples.rds"
 sampleNames <- readRDS(url(URLencode(sampleNames), "rb"))
-data <- read.csv("http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/12_UMI_mapping_position_directional_dedup_result/03.rerun.sum/isomiRs_833/CPM_IRP_select_combat.csv",row.names = 1)
-###火山图
+data <- read.csv("/path/to/table/CPM_IRP_select_combat.csv",row.names = 1)
+###Volcano Plot
 stats_fc_i <- de_cpf
 stats_fc_i$level = factor(ifelse(stats_fc_i$p.adjust < 0.01 & abs(stats_fc_i$logFC) >= log2(2), ifelse(stats_fc_i$logFC >= log2(2) ,'Up','Down'),'No'),levels=c('Up','Down','No'))
 if(all(c("Up","Down") %in% unique(stats_fc_i$level))){
@@ -453,7 +420,7 @@ p2 <- ggplot(stats_fc_i,aes(x=logFC,y=-log10(p.adjust),color=level))+
   geom_hline(yintercept = -log10(0.01),lty=2,col="black",lwd=0.5)
 
 ggsave(paste0("./paper/fig2/","de_cpf_padjust0.01_logfc2_volcaono.pdf"),p2,width = 6.5,height = 4)
-###venn和箱线图
+###venn and box plots
 data <- data[,names(data) %in% sampleNames]
 x <- list(IRP=gsub("_irp","",rownames(de_cpf)),
           IRE=gsub("_cpm","",rownames(de_cpm))
@@ -464,7 +431,7 @@ data$isomiRs <- rownames(data)
 dt <- melt(data)
 dt$group <- "IRP"
 dt$group[grepl("cpm",dt$isomiRs)] <- "IRE"
-Type <- read.csv("http://10.30.10.200:10085//storeData/project/user/anxiaolong/work/make_data/CRC/data_2/sample_data_608.csv")
+Type <- read.csv("/path/to/table/sample_data_608.csv")
 names(dt)[2] <- "sample"
 dt$isomiRs <- gsub("_irp|_cpm","",dt$isomiRs)
 dt <- merge(dt,Type,all.x = T)
@@ -507,22 +474,22 @@ files <- list.files(path,"de_intersect.*",recursive = T,full.names = T)
 qpdf::pdf_combine(files,paste0("./paper/fig2/","de_intersect_all_boxplot.pdf"))
 ```
 
-### 差异iso与TCGA比较
+### Comparison of differential isoforms with TCGA
 
 ```{r TCGA}
-data <- read.csv("http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/12_UMI_mapping_position_directional_dedup_result/03.rerun.sum/isomiRs_833/CPM_IRP_select_combat.csv",row.names = 1)
-de_cpm <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/de_genes_cpm_combat.rds"
+data <- read.csv("/path/to/table/CPM_IRP_select_combat.csv",row.names = 1)
+de_cpm <- "/path/to/table/de_genes_cpm_combat.rds"
 de_cpm <- readRDS(url(URLencode(de_cpm), "rb"))
-de_cpf <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/de_genes_irp_combat.rds"
+de_cpf <- "/path/to/table/de_genes_irp_combat.rds"
 de_cpf <- readRDS(url(URLencode(de_cpf), "rb"))
 
-raw_ruvg <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/raw_ruvg_edger_result.rds"
+raw_ruvg <- "/path/to/table/raw_ruvg_edger_result.rds"
 raw_ruvg <- readRDS(url(URLencode(raw_ruvg), "rb"))
 raw_ruvg$level <- get_diff_level(raw_ruvg)
-de_TCGA <- "http://10.30.10.200:10085//storeData/project/user/anxiaolong/work/make_data/CRC/model_result/TCGA/data/TCGA_CRC_expression_label_select_0.1_5_genes_result.rds"
+de_TCGA <- "/path/to/table/TCGA_CRC_expression_label_select_0.1_5_genes_result.rds"
 de_TCGA <- readRDS(url(URLencode(de_TCGA), "rb"))
 
-de_family <- "http://10.30.10.200:10085//storeData/project/user/anxiaolong/work/make_data/CRC/model_result/paper-xu/paper_plot/fig2/de_genes_family_combat.rds"
+de_family <- "/path/to/table/de_genes_family_combat.rds"
 de_family <- readRDS(url(URLencode(de_family), "rb"))
 
 filter_seq <- rownames(raw_ruvg) %>% lapply(function(x) strsplit(x,"_")[[1]][2]) %>% unlist() %>% unique()
@@ -577,10 +544,10 @@ p1 <- ggvenn(x,show_percentage=F,stroke_size=0,set_name_size = 8,text_size = 8,f
 ggsave("./paper/fig2/iso_family_cpm_venn_precent_Up_Down.pdf",p1,width = 7,height = 7)
 ```
 
-### 差异热图和pca图
+### Differential Heatmap and PCA Plot
 
 ```{r heatmap_group}
-group <- readxl::read_xlsx("G:/work/make_data/CRC/data_2/CRC_最终版(2).xlsx",sheet = "汇总")
+group <- readxl::read_xlsx("/path/to/table/CRC.xlsx",sheet = "汇总")
 names(group)[1] <- "sample"
 group$性别 <- gsub("男","Male",group$性别)
 group$性别 <- gsub("女","Female",group$性别)
@@ -711,19 +678,19 @@ get_edgeR_result <- function(data_count, diff, Type, pv=0.01, fcv=2, filter_fetu
   
   return(result)
 }
-data <- read.csv("http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/12_UMI_mapping_position_directional_dedup_result/03.rerun.sum/miRNAs_833/CPM_select_combat_833.csv",header = T,check.names = F,row.names = 1)
-data <- read.csv("http://10.30.10.200:10085//storeData/project/user/anxiaolong/work/make_data/CRC/model_result/paper-xu/paper_plot/isomiRs_CPM_select_mature_608.csv",header = T,check.names = F,row.names = 1)
+data <- read.csv("/path/to/table/CPM_select_combat_833.csv",header = T,check.names = F,row.names = 1)
+data <- read.csv("/path/to/table/isomiRs_CPM_select_mature_608.csv",header = T,check.names = F,row.names = 1)
 # names(data) <- gsub("R03|-.*","",names(data))
-sampleNames <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/training_samples.rds"
+sampleNames <- "/path/to/table/training_samples.rds"
 sampleNames <- readRDS(url(URLencode(sampleNames), "rb"))
 data <- data[,names(data) %in% sampleNames]
 group <- all_ann_col[rownames(all_ann_col) %in% names(data),]
 group$Sample <- rownames(group)
 result <- get_stats_result(data_count = data,diff = c("Cancer","Control"),Type = "Type",method = "wilcox.test")
-saveRDS(result,"G:/work/make_data/CRC/model_result/paper-xu/paper_plot/de_isomiRs_CPM_select_mature_608.rds")
-write.csv(result,"G:/work/make_data/CRC/model_result/paper-xu/paper_plot/de_isomiRs_CPM_select_mature_608.csv",row.names = F,quote = F)
+saveRDS(result,"/path/to/table/de_isomiRs_CPM_select_mature_608.rds")
+write.csv(result,"/path/to/table/de_isomiRs_CPM_select_mature_608.csv",row.names = F,quote = F)
 ###iso各分期差异
-data <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/exp_matrix_list.rds"
+data <- "/path/to/table/exp_matrix_list.rds"
 data <- readRDS(url(URLencode(data), "rb"))
 data <- data[["raw_ruvg"]] %>% as.data.frame()
 all_ann_col <- ann_col[which(ann_col$Type %in% c("Control","AA","SSA","Cancer")),]
@@ -734,7 +701,7 @@ group <- all_ann_col
 group$Sample <- rownames(group)
 for (i in c(1:4)) {
   assign(Names[i],get_edgeR_result(data_count = data,pv = 0.05,fcv = 2,diff = diff[[i]],Type = "Stage"))
-  ###火山图
+  ### volcano plot
   stats_fc_i <- get(Names[i])
   if(all(c("Up","Down") %in% unique(stats_fc_i$level))){
     color <- c("#DC143C","#00008B","#808080")
@@ -776,10 +743,7 @@ for (i in c(1:4)) {
     pca_x <- as.data.frame(pca$x)
     pca_x$Sample <- rownames(pca_x)
     pca_x <- merge(pca_x,group,by="Sample",all.x = T)
-    # asw_cpm_combat = average_silhouette_width_batch(pca_x[, 2:11], pca_x$Type, metric = 'cosine')
-    # pca_x$分期[which(pca_x$分期=="CRC III/IV")] <- ""
-    # pca_x$分期[which(pca_x$分期=="Health")] <- ""
-    # pca_x$分期[which(pca_x$分期=="High risk")] <- "NC"
+
     p <- ggplot(pca_x, aes(x = PC1, y = PC2, fill = Stage,starshape=Stage)) +
       # geom_point(size=3) +
       geom_star(size=3,aes(fill=Stage,color=Stage),show.legend = T,starstroke=0) + 
@@ -838,31 +802,24 @@ average_silhouette_width_batch <- function(data, batch_labels, metric = 'cosine'
     overall_average_silhouette = average_silhouette
   ))
 }
-###基于差异基因的热图
-iso <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/raw_ruvg_edger_result.rds"
+### pheatmap
+iso <- "/path/to/table/raw_ruvg_edger_result.rds"
 iso <- readRDS(url(URLencode(iso), "rb"))
-mature <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/mature_raw_ruvg_edger_result.rds"
+mature <- "/path/to/table/mature_raw_ruvg_edger_result.rds"
 mature <- readRDS(url(URLencode(mature), "rb"))
-isogroup <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/isogroup_raw_ruvg_edger_result.rds"
+isogroup <- "/path/to/table/isogroup_raw_ruvg_edger_result.rds"
 isogroup <- readRDS(url(URLencode(isogroup), "rb"))
 
-data <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/exp_matrix_list.rds"
+data <- "/path/to/table/exp_matrix_list.rds"
 data <- readRDS(url(URLencode(data), "rb"))
 
-sample_info <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/sample_info.rds"
+sample_info <- "/path/to/table/sample_info.rds"
 sample_info <- readRDS(url(URLencode(sample_info), "rb"))
-sample_info <- sample_info %>% select(sample,院区,miRNA测序芯片号,year) %>% rename(Source=院区,Chip=miRNA测序芯片号,Year=year)
-sample_info$Source <- gsub(" .*","",sample_info$Source)
-sample_info$Source[sample_info$Source=="解放"] <- "解放路"
-sample_info$Source[sample_info$Source=="滨江"] <- "BinJiang"
-sample_info$Source[sample_info$Source=="城东"] <- "ChengDong"
-sample_info$Source[sample_info$Source=="嘉善海宁"] <- "JiaShan"
-sample_info$Source[sample_info$Source=="解放路"] <- "JieFang"
 get_diff_level <- function(iso) {return(factor(ifelse(iso[["PValue"]] < 0.05 & abs(iso[["logFC"]]) > 1, ifelse( iso[["logFC"]] > 1 ,'Up','Down'),'No'),levels=c('Up','Down','No')))}
 iso$level <- get_diff_level(iso)
 mature$level <- get_diff_level(mature)
 isogroup$level <- get_diff_level(isogroup)
-sampleNames <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/training_samples.rds"
+sampleNames <- "/path/to/table/training_samples.rds"
 sampleNames <- readRDS(url(URLencode(sampleNames), "rb"))
 raw_ruvg <- as.data.frame(data[["raw_ruvg"]])
 raw_ruvg <- raw_ruvg[,names(raw_ruvg) %in% sampleNames]
@@ -889,14 +846,9 @@ for (i in c("raw","raw_ruvg","cpm")) {
     pca_x <- merge(pca_x,sample_info,by="sample",all.x = T)
     asw_cpm_combat = average_silhouette_width_batch(pca_x[, 2:3], pca_x$Type, metric = 'cosine')
     print(asw_cpm_combat$overall_average_silhouette)
-    # pca_x$分期[which(pca_x$分期=="CRC III/IV")] <- ""
-    # pca_x$分期[which(pca_x$分期=="Health")] <- ""
-    # pca_x$分期[which(pca_x$分期=="High risk")] <- "NC"
     p <- ggplot(pca_x, aes(x = PC1, y = PC2, fill = Source,starshape=Type)) +
-      # geom_point(size=3) +
       geom_star(size=3,aes(fill=Source,color=Source),show.legend = T,starstroke=0) + 
       stat_ellipse(aes(x = PC1, y = PC2,group=Source,color=Source),size = 0.5,level = 0.95,inherit.aes = F,show.legend = F)+
-      # geom_text_repel(aes(label = gsub("CRC ","",分期)), size = 5, show.legend = F)+
       theme_bw() + xlab(xlab1) + ylab(ylab1) + labs(title = "") +
       theme(legend.position = "right",legend.title = element_blank()) +
       theme(plot.title = element_text(size = 25),axis.title.x = element_text(size = 25),
@@ -907,10 +859,8 @@ for (i in c("raw","raw_ruvg","cpm")) {
     ggsave(paste0("./paper/fig2/","/",i,"_train_preprocess_Souorce_pca.pdf"),p,width = 7.5,height = 5)
     
     p <- ggplot(pca_x, aes(x = PC1, y = PC2, fill = Year,starshape=Type)) +
-      # geom_point(size=3) +
       geom_star(size=3,aes(fill=Year,color=Year),show.legend = T,starstroke=0) + 
       stat_ellipse(aes(x = PC1, y = PC2,group=Year,color=Year),size = 0.5,level = 0.95,inherit.aes = F,show.legend = F)+
-      # geom_text_repel(aes(label = gsub("CRC ","",分期)), size = 5, show.legend = F)+
       theme_bw() + xlab(xlab1) + ylab(ylab1) + labs(title = "") +
       theme(legend.position = "right",legend.title = element_blank()) +
       theme(plot.title = element_text(size = 25),axis.title.x = element_text(size = 25),
@@ -921,25 +871,19 @@ for (i in c("raw","raw_ruvg","cpm")) {
     ggsave(paste0("./paper/fig2/","/",i,"_train_preprocess_Year_pca.pdf"),p,width = 7.5,height = 5)   
 
     p <- ggplot(pca_x, aes(x = PC1, y = PC2, fill = Chip,starshape=Type)) +
-      # geom_point(size=3) +
       geom_star(size=3,aes(fill=Chip,color=Chip),show.legend = T,starstroke=0) + 
       stat_ellipse(aes(x = PC1, y = PC2,group=Chip,color=Chip),size = 0.5,level = 0.95,inherit.aes = F,show.legend = F)+
-      # geom_text_repel(aes(label = gsub("CRC ","",分期)), size = 5, show.legend = F)+
       theme_bw() + xlab(xlab1) + ylab(ylab1) + labs(title = "") +
       theme(legend.position = "right",legend.title = element_blank()) +
       theme(plot.title = element_text(size = 25),axis.title.x = element_text(size = 25),
     axis.title.y = element_text(size = 25),axis.text.x = element_text(size = 25,color="black"),legend.text=element_text(size = 25),axis.text.y = element_text(size = 25,color="black"),panel.grid.major=element_blank(),panel.grid.minor=element_blank()) +
-      #scale_color_nejm(name='') +
-      #scale_fill_nejm(name='') +
       scale_starshape_manual(values = c(15,29),name='')
     p <- p + guides(color = guide_legend(ncol = 2),fill = guide_legend(ncol = 2))
     ggsave(paste0("./paper/fig2/","/",i,"_train_preprocess_Chip_pca.pdf"),p,width = 14,height = 6)   
 
     p <- ggplot(pca_x, aes(x = PC1, y = PC2, fill = Type)) +
-      # geom_point(size=3) +
       geom_star(size=3,aes(fill=Type,color=Type),show.legend = T,starstroke=0) + 
       stat_ellipse(aes(x = PC1, y = PC2,group=Type,color=Type),size = 0.5,level = 0.95,inherit.aes = F,show.legend = F)+
-      # geom_text_repel(aes(label = gsub("CRC ","",分期)), size = 5, show.legend = F)+
       theme_bw() + xlab(xlab1) + ylab(ylab1) + labs(title = "") +
       theme(legend.position = "right",legend.title = element_blank()) +
       theme(plot.title = element_text(size = 25),axis.title.x = element_text(size = 25),
@@ -949,12 +893,6 @@ for (i in c("raw","raw_ruvg","cpm")) {
       scale_starshape_manual(values = c(15,29),name='')
     ggsave(paste0("./paper/fig2/","/",i,"_train_preprocess_Type_pca.pdf"),p,width = 7.5,height = 5) 
 }
-# data <- read.csv("http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/12_UMI_mapping_position_directional_dedup_result/03.rerun.sum/isomiRs_833/CPM_IRP_select_combat.csv",row.names = 1)
-# data <- data[,names(data) %in% sampleNames]
-# de_cpm <- de_cpm[order(-abs(de_cpm$logFC), de_cpm$p.adjust), ]
-# de_cpf <- de_cpf[order(-abs(de_cpf$logFC), de_cpf$p.adjust), ]
-# de_cpm_200 <- de_cpm[1:200,]
-# de_cpf_200 <- de_cpf[1:200,]
 iso_data <- as.data.frame(data[["raw_ruvg"]])
 iso_data <- iso_data[,names(iso_data) %in% sampleNames]
 mature_data <- as.data.frame(data[["mature_raw_ruvg"]])
@@ -1005,14 +943,9 @@ for (i in c("iso","mature","isogroup")) {
     pca_x <- merge(pca_x,group,by="sample",all.x = T)
     asw_cpm_combat = average_silhouette_width_batch(pca_x[, 2:3], pca_x$Type, metric = 'cosine')
     print(asw_cpm_combat$overall_average_silhouette)
-    # pca_x$分期[which(pca_x$分期=="CRC III/IV")] <- ""
-    # pca_x$分期[which(pca_x$分期=="Health")] <- ""
-    # pca_x$分期[which(pca_x$分期=="High risk")] <- "NC"
     p <- ggplot(pca_x, aes(x = PC1, y = PC2, fill = Type,starshape=Stage)) +
-      # geom_point(size=3) +
       geom_star(size=3,aes(fill=Type,color=Type),show.legend = T,starstroke=0) + 
       stat_ellipse(aes(x = PC1, y = PC2,group=Type,color=Type),size = 0.5,level = 0.95,inherit.aes = F,show.legend = F)+
-      # geom_text_repel(aes(label = gsub("CRC ","",分期)), size = 5, show.legend = F)+
       theme_bw() + xlab(xlab1) + ylab(ylab1) + labs(title = "") +
       theme(legend.position = "top",legend.title = element_blank()) +
       theme(plot.title = element_text(size = 25),axis.title.x = element_text(size = 25),
@@ -1028,13 +961,13 @@ for (i in c("iso","mature","isogroup")) {
     p3 <- pheatmap::pheatmap(train,show_rownames = F,show_colnames = F,cluster_cols = T,annotation_col = ann_col,annotation_colors = col,color = colorRampPalette(colors = c('steelblue','white' ,'firebrick'))(100),scale = "row",clustering_method = "complete",treeheight_row=100,clustering_distance_rows = "euclidean",legend_breaks=c(-5:5),breaks=seq(-5,5,0.1))
     ggsave(paste0("./paper/fig2/","/",i,"_train_preprocess_exp_heatmap_cluster.pdf"),p3,width = 6,height = 4)
 }
-###基于模型选定的热图
+### Model-based Selected Heatmap
 for (type in c("cpm","cpf")) {
     if(type=="cpm"){
-      path <- "G:/work/make_data/CRC/model_result/miRNA-2368/608_rf_miRNA_cpm_diff_beam_30_0.49_T_0_0/"
+      path <- "/path/to/folder/608_rf_miRNA_cpm_diff_beam_30_0.49_T_0_0/"
       number <- 664
     }else if(type=="cpf"){
-      path <- "G:/work/make_data/CRC/model_result/miRNA-2368/608_rf_miRNA_cpf_diff_beam_30_0.49_T_0_0/"
+      path <- "/path/to/folder/608_rf_miRNA_cpf_diff_beam_30_0.49_T_0_0/"
       number <- 710
     }
     train <- as.data.frame(t(read.csv(paste0(path,type,"_",number,"/train_best_features_other.csv"),row.names = 1,check.names = F)))
@@ -1057,13 +990,13 @@ for (type in c("cpm","cpf")) {
 }
 ```
 
-### iso有差异isogroup没差异
+### Isoforms have differences, but isogroups do not have differences.
 
 ```{r mechanism}
-###venn图
-iso <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/raw_ruvg_edger_result.rds"
+###venn plot
+iso <- "/path/to/table/raw_ruvg_edger_result.rds"
 iso <- readRDS(url(URLencode(iso), "rb"))
-isogroup <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/isogroup_raw_ruvg_edger_result.rds"
+isogroup <- "/path/to/table/isogroup_raw_ruvg_edger_result.rds"
 isogroup <- readRDS(url(URLencode(isogroup), "rb"))
 
 iso$level <- get_diff_level(iso)
@@ -1130,7 +1063,7 @@ qpdf::pdf_combine(files,paste0("./paper/fig2/mechanism/iso/","all_boxplot.pdf"))
 path <- "./paper/fig2/mechanism/intersect/"
 files <- list.files(path,"*",recursive = T,full.names = T)
 qpdf::pdf_combine(files,paste0("./paper/fig2/mechanism/intersect/","all_boxplot.pdf"))
-###绘制family的0值占比boxplot
+### Draw the boxplot of the proportion of zero values by family
 feature <- setdiff(rownames(data_family_diff),data_cpm_diff$family)
 stats_fc_i <- read.csv(paste0(file_path_cpm_iso_all,"/stats_diff_result.csv"),row.names = 1)
 stats_fc_f <- read.csv(paste0(file_path_family_all,"stats_diff_result.csv"),row.names = 1)
@@ -1157,16 +1090,11 @@ ggsave(paste0("G:/work/make_data/CPF_result/mechanism/family_iso_boxplot.pdf"),p
 ```
 
 
-### 差异marker的kegg等注释
+### KEGG and other annotations for differential markers
 
 ```{r target, eval=FALSE, include=FALSE}
 library(multiMiR)
-# de_cpm <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/de_genes_cpm_combat.rds"
-# de_cpm <- readRDS(url(URLencode(de_cpm), "rb"))
-# de_cpf <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/de_genes_irp_combat.rds"
-# de_cpf <- readRDS(url(URLencode(de_cpf), "rb"))
-# miRNA <- unique(gsub(".*_hsa","hsa",gsub("_irp|cpm","",c(rownames(de_cpf),rownames(de_cpm)))))
-iso <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/raw_ruvg_edger_result.rds"
+iso <- "/path/to/table/raw_ruvg_edger_result.rds"
 iso <- readRDS(url(URLencode(iso), "rb"))
 iso$level <- get_diff_level(iso)
 iso <- iso[iso$level!="No",]
@@ -1234,8 +1162,7 @@ ggsave(paste0(path,"C6/de_raw_ruvg_instersect_target_C6_plot.pdf"),p,width = 8,h
 
 ## fig 3
 
-
-### ROC曲线
+### ROC curve
 
 ```{r cpf_cpm}
 library(caret)
@@ -1395,15 +1322,12 @@ TCGA_model <- readRDS(url(URLencode(TCGA_model), "rb"))
 model_result$TCGA <- TCGA_model
 group <- ann_col
 group$Sample <- rownames(group)
-##多模型比较曲线图
+## Comparative Curve Plot for Multiple Models
 ########################################################################################
 predictions_list <- lapply(model_result, function(model_result) model_result$test_pred)
 
-# 将 list 转换为 data frame，并设置列名为模型名
 results_df <- do.call(cbind, predictions_list)
 colnames(results_df) <- names(model_result)
-
-# 设置行名为样本名（假设所有模型的样本名相同）
 rownames(results_df) <- names(model_result[[1]]$test_pred)
 results_df <- as.data.frame(results_df)
 results_df$Sample <- rownames(results_df)
@@ -1435,8 +1359,7 @@ p <- ggplot(result[result$label=="raw_ruvg_edger",], aes(x = Threshold, group = 
     panel.grid.major = element_blank(),
     panel.grid.minor = element_blank()
   )
- 
-# 创建自定义图例
+
 legend <- ggplot() + 
   geom_line(aes(x = c(0.15, 0.25), y = c(0.03, 0.03)), color = "firebrick", size = 1) +
   geom_text(aes(x = 0.27, y = 0.03, label = "Sensitivities"), hjust = 0, size = 8) +
@@ -1450,7 +1373,7 @@ p <- plot_grid(
   legend, p, 
   ncol = 1, 
   rel_heights = c(0.2, 1))
-ggsave("G:/work/make_data/CRC/model_result/paper-xu/paper_plot/fig3/raw_ruvg_edger_model_test_cutoff_sen_sep_line_plot.pdf",p,width = 9,height = 7.5)
+ggsave("/path/to/output/raw_ruvg_edger_model_test_cutoff_sen_sep_line_plot.pdf",p,width = 9,height = 7.5)
 ##############################################################################################################################
 
 for (i in names(model_result)) {
@@ -1565,16 +1488,16 @@ for (i in names(model_result)) {
   stage_boxplot(data,ann_col,i,"./paper/fig3/")
   stage_point(data,ann_col,i,"./paper/fig3/")
 }
-iso <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/raw_ruvg_edger_result.rds"
+iso <- "/path/to/table/raw_ruvg_edger_result.rds"
 iso <- readRDS(url(URLencode(iso), "rb"))
 ##i=TCGA
 iso$seq <- rownames(iso) %>% lapply(function(x) strsplit(x,"_")[[1]][2]) %>% unlist() 
 model_iso <- iso[iso$seq %in% gsub("\\.","-",model_result[["TCGA"]][["final_features"]]),]
 ##raw_ruvg
 model_iso <- iso[rownames(iso) %in% gsub("\\.","-",model_result[["raw_ruvg_edger"]][["final_features"]]),]
-data <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/exp_matrix_list.rds"
+data <- "/path/to/table/exp_matrix_list.rds"
 data <- readRDS(url(URLencode(data), "rb"))
-sampleNames <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/training_samples.rds"
+sampleNames <- "/path/to/table/training_samples.rds"
 sampleNames <- readRDS(url(URLencode(sampleNames), "rb"))
 raw_ruvg <- as.data.frame(data[["raw_ruvg"]])
 ###table5
@@ -1631,7 +1554,7 @@ dt <- dt %>%
     PValue < 0.001 ~ "***",
     PValue < 0.01 ~ "**",
     PValue < 0.05 ~ "*",
-    TRUE ~ "ns"  # ns 表示不显著
+    TRUE ~ "ns"  
   ))
 dt$isomiRs <- gsub("iso[^_]*_", "iso-", dt$isomiRs)
 dt$family <- gsub(".*_","",dt$isomiRs)
@@ -1654,8 +1577,8 @@ p <- ggplot(dt,aes(x=Type,y=value,color = Type)) +
 ggsave("./paper/fig3/TCGA_isomiRs_boxplot_test.pdf",p,width = 15,height = 18)
 ggsave("./paper/fig3/raw_ruvg_isomiRs_boxplot_test.pdf",p,width = 15,height = 18)
 
-TCGA_data <- read.csv("http://10.30.10.200:10085//storeData/project/user/anxiaolong/work/make_data/CRC/model_result/TCGA/data/TCGA_CRC_expression_label_select_0.1_5.csv",check.names = F,row.names = 1)
-TCGA_diff <- "http://10.30.10.200:10085//storeData/project/user/anxiaolong/work/make_data/CRC/model_result/TCGA/data/TCGA_CRC_expression_label_select_0.1_5_genes_result.rds"
+TCGA_data <- read.csv("/path/to/table/TCGA_CRC_expression_label_select_0.1_5.csv",check.names = F,row.names = 1)
+TCGA_diff <- "/path/to/table/TCGA_CRC_expression_label_select_0.1_5_genes_result.rds"
 TCGA_diff <- readRDS(url(URLencode(TCGA_diff), "rb"))
 sub_TCGA <- TCGA_data[gsub("_.*","",rownames(TCGA_data)) %in% c("Type",model_iso$seq),] %>% t() %>% as.data.frame()
 sub_TCGA$Type <- as.character(sub_TCGA$Type)
@@ -1676,7 +1599,7 @@ df <- df %>%
     PValue < 0.001 ~ "***",
     PValue < 0.01 ~ "**",
     PValue < 0.05 ~ "*",
-    TRUE ~ "ns"  # ns 表示不显著
+    TRUE ~ "ns"  
   ))
 re <- df %>% group_by(isomiRs) %>% summarise(y = max(value))
 df <- base::merge(df,re)
@@ -1730,7 +1653,7 @@ p1 <- ROC_line_3(train,test,val,"")
 ggsave(paste0(path,"/train_cpf_cpm_combine_roc_plot.pdf"),p1,width = 9,height = 6)
 ```
 
-### 生存分析
+### Survival Analysis
 
 ```{r life}
 library("survival")
@@ -1742,24 +1665,13 @@ library("glmnet")
 library("patchwork")
 set.seed(1234)
 get_diff_level <- function(iso) {return(factor(ifelse(iso[["PValue"]] < 0.05 & abs(iso[["logFC"]]) > 1, ifelse( iso[["logFC"]] > 1 ,'Up','Down'),'No'),levels=c('Up','Down','No')))}
-group <- readxl::read_xlsx("G:/work/make_data/CRC/data_2/CRC_最终版(3).xlsx",sheet = "汇总")
-# group <- readxl::read_xlsx("G:/work/make_data/CRC/data_2/CRC_最终版(3).xlsx",sheet = "汇总")
+group <- readxl::read_xlsx("/path/to/table/CRC_final.xlsx")
 names(group)[1] <- "sample"
-group$性别 <- gsub("男","Male",group$性别)
-group$性别 <- gsub("女","Female",group$性别)
-group$建模分组 <- gsub("normal","Normal",group$建模分组)
-group$建模分组 <- gsub("benign lesions","NAA",group$建模分组)
-group$建模分组 <- gsub("CRC-stageIII|CRC-stageIV","CRC III/IV",group$建模分组)
-group$建模分组 <- gsub("CRC-stageI|CRC-stageII","CRC I/II",group$建模分组)
-group$Type <- group$建模分组
-group$Type <- gsub("Normal|NAA","Control",group$Type)
-group$Type <- gsub("CRC I/II|CRC III/IV","Cancer",group$Type)
 ann_col <- data.frame(row.names = group$sample,Type=group$Type,Stage=group$建模分组,Age=group$年龄,Gender=group$性别)
-model_result <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/train_eval_result_v2.rds"
+model_result <- "/path/to/table/train_eval_result_v2.rds"
 model_result <- readRDS(url(URLencode(model_result), "rb"))
 sample_info <- openxlsx::read.xlsx(xlsxFile = "./paper/fig3/CRC_new.xlsx",sheet = 1)
-# sample_info <- openxlsx::read.xlsx(xlsxFile = "/storeData/project/15-NHpreStudy_miRNA/01-user/03-bianzilong/input/CRC_new.xlsx",sheet = 1)
-data <- "http://10.30.10.200:10085//storeData/project/19-preRD_isomir_CRC/code_figures/7_microRNA_iso_对比/exp_matrix_list.rds"
+data <- "/path/to/table/exp_matrix_list.rds"
 data <- readRDS(url(URLencode(data), "rb"))
 # load(file="./paper/fig3/miRNA_log_z.Rdata")
 raw_ruvg <- data[["raw_ruvg"]] %>% t() %>% as.data.frame()
@@ -1795,20 +1707,20 @@ result <- result %>% select(names(result)[1:9],rownames(iso))
 pFilter=0.05 
 outResult=data.frame() 
 sigGenes=c("os_state","os_time")
-for(i in 9:dim(result)[2]){ #从第3列开始循环，因为1列2列不是gene，是surstat和surtime
-  tdcox <- coxph(Surv(os_time, status) ~ result[,i], data = result)#开始逐一循环cox分析
-  tdcoxSummary = summary(tdcox) #summary命令对tdcox总结，方面后面提取数据
-  pvalue=tdcoxSummary$coefficients[,"Pr(>|z|)"] #提取p值，这个主要是后面提取有意义的gene用
-  if(pvalue<pFilter){ # 这里我们不需要提取所有基因的数据，只需要有意义的gene的结果，所以设置如果pvalue<0.05才提取数据
+for(i in 9:dim(result)[2]){ #Start looping from the third column, because the first and second columns are not genes; they are surstat and surtime
+  tdcox <- coxph(Surv(os_time, status) ~ result[,i], data = result)#Start looping through Cox analysis one by one
+  tdcoxSummary = summary(tdcox) 
+  pvalue=tdcoxSummary$coefficients[,"Pr(>|z|)"] #get p value
+  if(pvalue<pFilter){ # set cutoff pvalue<0.05 
     sigGenes=c(sigGenes,i)
-    outResult=rbind(outResult,#合并行，实际上是对循环结果的合并，前面设置的空白数据框outResult这里用，循环必须有个开始
-                    cbind(id=i,#合并列，是每个基因的统计数据
-                          HR=tdcoxSummary$conf.int[,"exp(coef)"],#提取单个基因的HR
+    outResult=rbind(outResult,#The merging of the loop results. The loop must have a starting point.
+                    cbind(id=i,
+                          HR=tdcoxSummary$conf.int[,"exp(coef)"],#Extract the HR (Hazard Ratio) of a single gene
                           coef=tdcoxSummary$coefficients[,1],
                           se=tdcoxSummary$coefficients[,3],
-                          L95CI=tdcoxSummary$conf.int[,"lower .95"],#提取单个基因的HR的95%CI低值
-                          H95CI=tdcoxSummary$conf.int[,"upper .95"],#提取单个基因的HR的95%CI高值
-                          pvalue=tdcoxSummary$coefficients[,"Pr(>|z|)"])#提取单个基因的p值
+                          L95CI=tdcoxSummary$conf.int[,"lower .95"],
+                          H95CI=tdcoxSummary$conf.int[,"upper .95"],
+                          pvalue=tdcoxSummary$coefficients[,"Pr(>|z|)"])
     )
   }
 }
@@ -1824,7 +1736,7 @@ x <- model.matrix(frm, data = result)[, -1]  # Remove intercept
 y <- Surv(result$os_time, result$status)
 lasso_model <- cv.glmnet(x, y, family = "cox", alpha = 0.4)
 selected_features_lasso <- coef(lasso_model, s = "lambda.min")
-# 获取非零系数（选择的特征）的名称
+# Obtain the names of non-zero coefficients (selected features)
 selected_feature_names_lasso <- rownames(selected_features_lasso)[selected_features_lasso[, 1] != 0]
 # selected_feature_names_lasso <- selected_feature_names_lasso[selected_feature_names_lasso != "`iso-18-UL21XXZ_TAATACAACCTGCTAAGT_hsa-miR-374c-5p`"]
 frm=as.formula(paste0("Surv(os_time , status) ~","age+gender+stage+",paste(
@@ -1834,7 +1746,7 @@ multicox_step=step(multicox)
 frm=as.formula(paste0("Surv(os_time , status) ~","gender+",paste(
                      paste0(names(multicox_step$coefficients)),collapse="+")))
 multicox <- coxph(frm,data = result)
-# 生存曲线
+# survival curve
 mss=summary(multicox)
 mss_coef=mss$coefficients
 coef=as.data.frame(mss_coef)
@@ -1856,37 +1768,11 @@ p <- ggforestplot::forestplot(df = coef,
                             xlab = "HR",
                             title = "",
                             logodds = T)
-# ggsave("./paper/fig3/multi_cox_step_fsplot_score.pdf",plot = p,width = 4,height = 2)
 ggsave("./paper/fig3/multi_cox_step_fsplot.pdf",plot = p,width = 8,height = 8)
 
-# re <- result
-# # names(re) <- gsub("iso[^_]*_", "iso-", names(re))
-# names(re) <- gsub("_", "-", names(re))
-theme2 <- theme(axis.ticks.x = element_blank(), ## 删去所有刻度线
+theme2 <- theme(axis.ticks.x = element_blank(), 
                 axis.text.x = element_blank(),
                 axis.title.x = element_blank())
-# for (i in coef$name) {
-#   if(i=="Age"){
-#     re$age <- ifelse(re$age>=60,1,0)
-#     fit <- survfit(Surv(`os-time` , status)~age,data = re)
-#     p <- ggsurvplot(fit,data = re,palette = "nejm",pval.method = T,pval = T,conf.int = T,risk.table = T,xlab="Time/Days",legend.labs=c("Low","High"))
-#   }else if(i == "Gender"){
-#     fit <- survfit(Surv(`os-time` , status)~gender,data = re)
-#     p <- ggsurvplot(fit,data = re,palette = "nejm",pval.method = T,pval = T,conf.int = T,risk.table = T,xlab="Time/Days",legend.labs=c("male","Female"))
-#   }else if(i == "Stage"){
-#     fit <- survfit(Surv(`os-time` , status)~stage,data = re)
-#     p <- ggsurvplot(fit,data = re,palette = "nejm",pval.method = T,pval = T,conf.int = T,risk.table = T,xlab="Time/Days")
-#   }else{
-#     re[[i]] <- ifelse(re[[i]] >= mean(re[[i]]),1,0)
-#     fit <- survfit(Surv(`os-time` , status)~re[,i],data = re)
-#     p <- ggsurvplot(fit,data = re,palette = "nejm",xlab="Time/Days",pval.method = T,pval = T,conf.int = T,risk.table = T,legend.labs=c("Low","High"))
-#   }
-#   p_up <- p$plot + theme2
-#   p_down <- p$table
-#   pdf(file=paste0("./paper/fig3/survplot/",i,"_survplot.pdf"),width = 6,height = 5)
-#   print(p_up/p_down+plot_layout(heights = c(5,2)))
-#   dev.off()
-# }
 for (m in c("iso","age")) {
   re <- result
   if(m=="iso"){
@@ -1914,7 +1800,6 @@ for (m in c("iso","age")) {
                                 xlab = "HR",
                                 title = "",
                                 logodds = T)
-    # ggsave("./paper/fig3/multi_cox_step_fsplot_score.pdf",plot = p,width = 4,height = 2)
     ggsave("./paper/fig3/multi_cox_step_fsplot_isomiR.pdf",plot = p,width = 8,height = 8)
   }else if(m=="age"){
     frm=as.formula(paste0("Surv(os_time, status) ~ age + gender + stage + score"))
@@ -1975,13 +1860,12 @@ library(timeROC)
 tROC <-timeROC(T=result$os_time,delta = result$status,marker = score,
                cause = 1,times = c(1*365,3*365,5*365),ROC=T
 )
-#开始画图
 pdf(file="./paper/fig3/auc.pdf",width = 8*0.6,height = 8*0.6)
-par(mar= c(5,5,1,1),cex.lab=1.5,cex.axis= 1.2) #设置图形边界
-plot(tROC,time=1*365,col="red",title=F,lwd=2) #1年ROC
-plot(tROC,time=3*365,col="green",add=T,title=F,lwd=2) #3年ROC
-plot(tROC,time=5*365,col="blue",add=T,title=F,lwd=2) #5年ROC
-legend("bottomright", # 这里设置legend的位置坐标：横坐标0,纵坐标1。也可以像前面一样设置为"bottomright"等
+par(mar= c(5,5,1,1),cex.lab=1.5,cex.axis= 1.2) 
+plot(tROC,time=1*365,col="red",title=F,lwd=2) #1-Year ROC
+plot(tROC,time=3*365,col="green",add=T,title=F,lwd=2) #3-Year ROC
+plot(tROC,time=5*365,col="blue",add=T,title=F,lwd=2) #5-Year ROC
+legend("bottomright", 
        c(paste0("AUC at 1 years  ", round(tROC$AUC[1], 3)),
          paste0("AUC at 3 years  ", round(tROC$AUC[2], 3)),
          paste0("AUC at 5 years  ", round(tROC$AUC[3], 3))),
@@ -2000,20 +1884,20 @@ f2 <- cph(frm
 try({cal1 <- calibrate(f2, 
                   cmethod='KM', 
                   method="boot", 
-                  u=365, # u需要与之前模型中定义好的time.inc一致，即365或730；
-                  m=110, #每次抽样的样本量，
-                  B=1000) #抽样次数
+                  u=365, # u needs to be consistent with the time.inc defined in the previous model, which is either 365 or 730
+                  m=110, #The sample size for each sampling
+                  B=1000) #Number of samplings
 }, silent = FALSE)
-## m要根据样本量来确定，由于标准曲线一般将所有样本分为3组（在图中显示3个点）
-## 绘制校正曲线
+## m should be determined based on the sample size, as the standard curve generally divides all samples into three groups (displayed as three points in the graph)
+## Plot the calibration curve
 f2 <- cph(frm
           , x=T, y=T , data = result,surv = T,time.inc = 1095)
 try({cal2 <- calibrate(f2, 
                   cmethod='KM', 
                   method="boot", 
-                  u=1095, # u需要与之前模型中定义好的time.inc一致，即365或730；
+                  u=1095, 
                   #u=730,
-                  m=110, #每次抽样的样本量，
+                  m=110, 
                   B=1000)
 }, silent = FALSE)
 f2 <- cph(frm
@@ -2021,49 +1905,45 @@ f2 <- cph(frm
 try({cal3 <- calibrate(f2,
                   cmethod='KM', 
                   method="boot", 
-                  u=1825, # u需要与之前模型中定义好的time.inc一致，即365或730；
+                  u=1825, 
                   #u=1095,
-                  m=110, #每次抽样的样本量，
+                  m=110, 
                   B=1000)
 }, silent = FALSE)
 
 
 pdf(file="./paper/fig3/Calibration.pdf", width = 8*0.65,height = 8*0.65)
 plot(cal1,lwd=2,lty=1,
-     conf.int=T,# 是否显示置信区间
-     errbar.col=c(rgb(5,110,188 , maxColorValue = 255) ),#直线曲线bar颜色
-     #col="red", # 曲线颜色
+     conf.int=T,
+     errbar.col=c(rgb(5,110,188 , maxColorValue = 255) ),
      xlim=c(0,1),ylim=c(0,1),
      xlab="Nomogram predicted survival probability",
      ylab="Observed fraction survival probability",
      col = c(rgb(5,110,188 , maxColorValue = 255)),
      main = "Calibration curve" ,
-     subtitles = F)#不显示副标题
+     subtitles = F)
 
 
 plot(cal2,lwd=2,lty=1,
-     #conf.int=T,# 是否显示置信区间
-     errbar.col=c(rgb(234,196,19 , maxColorValue = 255) ),#直线曲线bar颜色
-     #col="red", # 曲线颜色
+     #conf.int=T,
+     errbar.col=c(rgb(234,196,19 , maxColorValue = 255) ),
      xlim=c(0,1),ylim=c(0,1),
      add = TRUE,
      xlab="Nomogram predicted survival probability",
      ylab="Observed fraction survival probability",
      col = c(rgb(234,196,19 , maxColorValue = 255)),
-     subtitles = F)#不显示副标题
+     subtitles = F)
 
 
 plot(cal3,lwd=2,lty=1,
-     conf.int=T,# 是否显示置信区间
-     errbar.col=c(rgb(137,137,137 , maxColorValue = 255)),#直线曲线bar颜色
-     #col="red", # 曲线颜色
+     conf.int=T,
+     errbar.col=c(rgb(137,137,137 , maxColorValue = 255)),
      xlim=c(0,1),ylim=c(0,1),
      add = TRUE,
      xlab="Nomogram predicted survival probability",
      ylab="Observed fraction survival probability",
      col = c(rgb(137,137,137 , maxColorValue = 255)),
-     subtitles = F)#不显示副标题
-
+     subtitles = F)
 
 lines(cal1[,c('mean.predicted' , "KM")] , type = "b" , lwd = 2 ,  col = c(rgb(5,110,188 , maxColorValue = 255)),pch = 16)
 lines(cal1[,c('mean.predicted' , "KM")] , type = "b" , lwd = 2 ,  col = c(rgb(137,137,137 , maxColorValue = 255)),pch = 16)
@@ -2087,12 +1967,8 @@ dev.off()
 ```{r result}
 data <- predict_score
 names(data)[1] <- "sample"
-group <- readxl::read_xlsx("G:/work/make_data/CRC/data_2/CRC_最终版(2).xlsx",sheet = "汇总")
+group <- readxl::read_xlsx("/path/to/table/CRC_final2.xlsx")
 names(group)[1] <- "sample"
-group$性别 <- gsub("男","Male",group$性别)
-group$性别 <- gsub("女","Female",group$性别)
-group$建模分组 <- gsub("normal","Normal",group$建模分组)
-group$建模分组 <- gsub("benign lesions","Benign lesions",group$建模分组)
 ann_col <- data.frame(sample = group$sample,Stage=group$建模分组,Age=group$年龄,Gender=group$性别,病理信息=group$病理信息)
 df <- merge(data,ann_col)
 df <- df[df$Stage %in% c("AA","SSA"),]
@@ -2127,12 +2003,8 @@ ggsave("./paper/fig3/APL_size_cor_line.pdf",width = 5.5,height = 5)
 ```{r result}
 data <- predict_score
 names(data)[1] <- "sample"
-group <- readxl::read_xlsx("G:/work/make_data/CRC/data_2/CRC_最终版(3).xlsx",sheet = "汇总")
+group <- readxl::read_xlsx("/path/to/table/CRC_final3.xlsx")
 names(group)[1] <- "sample"
-group$性别 <- gsub("男","Male",group$性别)
-group$性别 <- gsub("女","Female",group$性别)
-group$建模分组 <- gsub("normal","Normal",group$建模分组)
-group$建模分组 <- gsub("benign lesions","Benign lesions",group$建模分组)
 ann_col <- data.frame(sample = group$sample,Stage=group$建模分组,Age=group$年龄,Gender=group$性别,Subgroup=group$亚组)
 dt <- merge(data,ann_col)
 dt <- dt[dt$Stage %in% c("AA","SSA"),]
